@@ -6,16 +6,16 @@ use std::fmt;
 use std::thread::JoinHandle;
 
 use alloc_no_stdlib::{Allocator, SliceWrapper};
-use brotli::dictionary::{
+use simd_brotli::dictionary::{
     kBrotliDictionary, kBrotliDictionaryOffsetsByLength, kBrotliDictionarySizeBitsByLength,
 };
-use brotli::enc::BrotliAlloc;
-use brotli::enc::threading::{
+use simd_brotli::enc::BrotliAlloc;
+use simd_brotli::enc::threading::{
     AnyBoxConstructor, BatchSpawnable, BatchSpawnableLite, BrotliEncoderThreadError, InternalOwned,
     InternalSendAlloc, Joinable, Owned, OwnedRetriever, PoisonedThreadError, SendAlloc,
 };
-use brotli::interface;
-use brotli::transform::TransformDictionaryWord;
+use simd_brotli::interface;
+use simd_brotli::transform::TransformDictionaryWord;
 
 struct HexSlice<'a>(&'a [u8]);
 

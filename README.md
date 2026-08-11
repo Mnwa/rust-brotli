@@ -1,7 +1,54 @@
-# rust-brotli
+# simd-brotli
 
-[![crates.io](https://img.shields.io/crates/v/brotli.svg)](https://crates.io/crates/brotli)
-[![Build Status](https://travis-ci.org/dropbox/rust-brotli.svg?branch=master)](https://travis-ci.org/dropbox/rust-brotli)
+[![crates.io](https://img.shields.io/crates/v/simd-brotli.svg)](https://crates.io/crates/simd-brotli)
+[![docs.rs](https://img.shields.io/docsrs/simd-brotli)](https://docs.rs/simd-brotli/)
+
+A brotli compressor and decompressor, forked from
+[`brotli`](https://crates.io/crates/brotli) with the encoder's hot paths rewritten to run on
+SIMD. It produces byte-identical output to the crate it forks; the difference is how fast it
+gets there.
+
+```toml
+[dependencies]
+simd-brotli = "9.0"
+```
+
+```rust
+use simd_brotli::CompressorWriter;
+```
+
+## What this fork changes
+
+* **Vectorized with [`fearless_simd`](https://crates.io/crates/fearless_simd)** instead of the
+  old `packed_simd`/`stdsimd` shims, so the wide paths build on **stable** Rust with **no
+  `unsafe`** and no nightly-only features. The instruction set is picked at runtime — an AVX2
+  machine takes the AVX2 path, an Apple Silicon machine takes the NEON path, from the same
+  binary — and `no_std` builds still work, falling back to the level the crate was compiled
+  for.
+* **More of the encoder is vectorized than upstream.** Upstream only vectorized a couple of
+  cost loops; this fork also runs the H10 match finder, the Zopfli node update, the static
+  dictionary's match-length probe, block splitting's per-histogram cost scan, and the
+  population-cost walk on wide lanes.
+* **Hot-path algorithmic work**, most visibly histogram clustering, which now costs the sum of
+  two histograms without materializing it.
+* **A built-in profiler.** `--features hotpath` instruments the encoder pipeline stage by stage;
+  a default build neither links it nor pays for it. See
+  [Profiling the encoder](#profiling-the-encoder).
+
+Compressed output is unchanged: every optimization here is bit-identical to the scalar code it
+replaces, so streams stay byte-for-byte the same as upstream's and the format guarantees below
+still hold. This is checked, not assumed — output is diffed against the upstream base across
+qualities 0–11 (including 9.5, 9.5x and 9.5y) on four corpora, and all 60 pairs match byte for
+byte.
+
+On a 3.1 MB varied corpus (Apple M5 Pro, NEON, release + LTO, best of three) the fork encodes
+about **11% faster at q9, 15% at q10 and 8% at q11**. The win depends on your CPU's instruction
+set and on how much of your input reaches the slow paths, so measure your own workload. See
+[CHANGELOG.md](CHANGELOG.md) for the full list of changes.
+
+The library is named `simd_brotli`, not `brotli`, so it can coexist with the upstream crate in
+one dependency graph. Migrating from `brotli` is a rename of the import; the API is otherwise
+untouched.
 
 # What's new in 8.0.4
 Fix: adjust versions of rust-decompressor and rust-alloc-no-stdlib and
@@ -96,7 +143,7 @@ Recommended lg_window_size is between 20 and 22
 
 ### With the io::Read abstraction
 ```rust
-let mut input = brotli::CompressorReader::new(&mut io::stdin(), 4096 /* buffer size */,
+let mut input = simd_brotli::CompressorReader::new(&mut io::stdin(), 4096 /* buffer size */,
                                               quality as u32, lg_window_size as u32);
 ```
 then you can simply read input as you would any other io::Read class
@@ -104,7 +151,7 @@ then you can simply read input as you would any other io::Read class
 ### With the io::Write abstraction
 
 ```rust
-let mut writer = brotli::Compressor::new(&mut io::stdout(), 4096 /* buffer size */,
+let mut writer = simd_brotli::Compressor::new(&mut io::stdout(), 4096 /* buffer size */,
                                          quality as u32, lg_window_size as u32);
 ```
 
@@ -114,14 +161,14 @@ eg:
 ```rust
 let params = BrotliEncoderParams::default();
 // modify params to fit the application needs
-let mut writer = brotli::Compressor::with_params(&mut io::stdout(), 4096 /* buffer size */,
+let mut writer = simd_brotli::Compressor::with_params(&mut io::stdout(), 4096 /* buffer size */,
                                          params);
 ```
 or for the reader
 ```rust
 let params = BrotliEncoderParams::default();
 // modify params to fit the application needs
-let mut writer = brotli::CompressorReader::with_params(&mut io::stdin(), 4096 /* buffer size */,
+let mut writer = simd_brotli::CompressorReader::with_params(&mut io::stdin(), 4096 /* buffer size */,
                                                        params);
 ```
 
@@ -129,7 +176,7 @@ let mut writer = brotli::CompressorReader::with_params(&mut io::stdin(), 4096 /*
 ### With the Stream Copy abstraction
 
 ```rust
-match brotli::BrotliCompress(&mut io::stdin(), &mut io::stdout(), &brotli_encoder_params) {
+match simd_brotli::BrotliCompress(&mut io::stdin(), &mut io::stdout(), &brotli_encoder_params) {
     Ok(_) => {},
     Err(e) => panic!("Error {:?}", e),
 }
@@ -140,20 +187,20 @@ match brotli::BrotliCompress(&mut io::stdin(), &mut io::stdout(), &brotli_encode
 ### With the io::Read abstraction
 
 ```rust
-let mut input = brotli::Decompressor::new(&mut io::stdin(), 4096 /* buffer size */);
+let mut input = simd_brotli::Decompressor::new(&mut io::stdin(), 4096 /* buffer size */);
 ```
 then you can simply read input as you would any other io::Read class
 
 ### With the io::Write abstraction
 
 ```rust
-let mut writer = brotli::DecompressorWriter::new(&mut io::stdout(), 4096 /* buffer size */);
+let mut writer = simd_brotli::DecompressorWriter::new(&mut io::stdout(), 4096 /* buffer size */);
 ```
 
 ### With the Stream Copy abstraction
 
 ```rust
-match brotli::BrotliDecompress(&mut io::stdin(), &mut io::stdout()) {
+match simd_brotli::BrotliDecompress(&mut io::stdin(), &mut io::stdout()) {
     Ok(_) => {},
     Err(e) => panic!("Error {:?}", e),
 }

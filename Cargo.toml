@@ -1,13 +1,17 @@
 [package]
-name = "brotli"
+name = "simd-brotli"
 version = "9.0.0"
-authors = ["Daniel Reiter Horn <danielrh@dropbox.com>", "The Brotli Authors"]
-description = "A brotli compressor and decompressor that with an interface avoiding the rust stdlib. This makes it suitable for embedded devices and kernels. It is designed with a pluggable allocator so that the standard lib's allocator may be employed. The default build also includes a stdlib allocator and stream interface. Disable this with --features=no-stdlib. All included code is safe."
+authors = [
+  "Mikhail Panfilov <mihan@panfilov.biz>",
+  "Daniel Reiter Horn <danielrh@dropbox.com>",
+  "The Brotli Authors",
+]
+description = "A brotli compressor and decompressor with an interface avoiding the rust stdlib, so it suits embedded devices and kernels. A fork of `brotli` whose encoder hot paths are vectorized with `fearless_simd`, giving runtime-dispatched SIMD on stable Rust with no unsafe code. It is designed with a pluggable allocator so that the standard lib's allocator may be employed. The default build also includes a stdlib allocator and stream interface. Disable this with --features=no-stdlib. All included code is safe."
 license = "BSD-3-Clause AND MIT"
-documentation = "https://docs.rs/brotli/"
-homepage = "https://github.com/dropbox/rust-brotli"
-repository = "https://github.com/dropbox/rust-brotli"
-keywords = ["brotli", "decompression", "lz77", "huffman", "nostd"]
+documentation = "https://docs.rs/simd-brotli/"
+homepage = "https://github.com/Mnwa/rust-brotli"
+repository = "https://github.com/Mnwa/rust-brotli"
+keywords = ["brotli", "compression", "simd", "lz77", "nostd"]
 categories = ["compression", "no-std"]
 readme = "README.md"
 autobins = false
@@ -19,10 +23,18 @@ include = [
   "/examples/**/*.rs",
   "/Cargo.toml",
   "/README.md",
+  "/CHANGELOG.md",
   "/LICENSE.BSD-3-Clause",
   "/LICENSE.MIT",
 ]
 
+# The library target takes the package's own name: `use simd_brotli::...`. Upstream `brotli` can
+# therefore sit in the same dependency graph without a symbol or import collision.
+[lib]
+name = "simd_brotli"
+path = "src/lib.rs"
+
+# The binaries keep the upstream names so command lines and scripts are unchanged.
 [[bin]]
 doc = false
 name = "brotli"

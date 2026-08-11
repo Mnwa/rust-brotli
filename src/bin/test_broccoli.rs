@@ -10,9 +10,9 @@ use core::cmp::{max, min};
 use brotli_decompressor::{CustomRead, CustomWrite};
 
 use super::Rebox;
-use super::brotli::concat::{BroCatli, BroCatliResult};
-use super::brotli::enc::BrotliEncoderParams;
 use super::integration_tests::UnlimitedBuffer;
+use super::simd_brotli::concat::{BroCatli, BroCatliResult};
+use super::simd_brotli::enc::BrotliEncoderParams;
 
 static RANDOM_THEN_UNICODE: &[u8] = include_bytes!("../../testdata/random_then_unicode");
 static ALICE: &[u8] = include_bytes!("../../testdata/alice29.txt");

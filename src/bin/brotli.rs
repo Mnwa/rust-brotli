@@ -1,11 +1,11 @@
 #![cfg_attr(feature = "benchmark", feature(test))]
 
 extern crate alloc_no_stdlib;
-extern crate brotli;
 extern crate brotli_decompressor;
 extern crate core;
 #[cfg(feature = "validation")]
 extern crate sha2;
+extern crate simd_brotli;
 
 pub mod integration_tests;
 mod test_broccoli;
@@ -22,12 +22,12 @@ use std::fs::File;
 use std::io::{self, Error, ErrorKind, Read, Seek, SeekFrom, Write};
 
 use alloc_no_stdlib::{Allocator, SliceWrapper, SliceWrapperMut};
-use brotli::CustomRead;
-use brotli::enc::backward_references::BrotliEncoderMode;
-use brotli::enc::threading::{
+use simd_brotli::CustomRead;
+use simd_brotli::enc::backward_references::BrotliEncoderMode;
+use simd_brotli::enc::threading::{
     BrotliEncoderThreadError, CompressMulti, CompressionThreadResult, Owned, SendAlloc,
 };
-use brotli::enc::{
+use simd_brotli::enc::{
     BrotliEncoderMaxCompressedSizeMulti, BrotliEncoderParams, UnionHasher, WorkerPool,
     compress_worker_pool, new_work_pool,
 };
@@ -92,17 +92,17 @@ impl<T: core::clone::Clone + Default> alloc_no_stdlib::Allocator<T> for HeapAllo
 }
 
 /*
-type HeapBrotliAlloc = brotli::CombiningAllocator<
+type HeapBrotliAlloc = simd_brotli::CombiningAllocator<
                       HeapAllocator<u8>,
                       HeapAllocator<u16>,
                       HeapAllocator<i32>,
                       HeapAllocator<u32>,
                       HeapAllocator<u64>,
                       HeapAllocator<Command>,
-                      HeapAllocator<brotli::enc::floatX>,
+                      HeapAllocator<simd_brotli::enc::floatX>,
                       HeapAllocator<v8>,
                       HeapAllocator<s16>,
-                      HeapAllocator<brotli::enc::PDF>,
+                      HeapAllocator<simd_brotli::enc::PDF>,
                       HeapAllocator<StaticCommand>,
                       HeapAllocator<HistogramLiteral>,
                       HeapAllocator<HistogramCommand>,
@@ -128,7 +128,9 @@ pub struct IoWriterWrapper<'a, OutputType: Write + 'a>(&'a mut OutputType);
 
 pub struct IoReaderWrapper<'a, OutputType: Read + 'a>(&'a mut OutputType);
 
-impl<'a, OutputType: Write> brotli::CustomWrite<io::Error> for IoWriterWrapper<'a, OutputType> {
+impl<'a, OutputType: Write> simd_brotli::CustomWrite<io::Error>
+    for IoWriterWrapper<'a, OutputType>
+{
     fn flush(&mut self) -> Result<(), io::Error> {
         loop {
             match self.0.flush() {
@@ -153,7 +155,7 @@ impl<'a, OutputType: Write> brotli::CustomWrite<io::Error> for IoWriterWrapper<'
     }
 }
 
-impl<'a, InputType: Read> brotli::CustomRead<io::Error> for IoReaderWrapper<'a, InputType> {
+impl<'a, InputType: Read> simd_brotli::CustomRead<io::Error> for IoReaderWrapper<'a, InputType> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         loop {
             match self.0.read(buf) {
@@ -169,7 +171,7 @@ impl<'a, InputType: Read> brotli::CustomRead<io::Error> for IoReaderWrapper<'a, 
 
 struct IntoIoReader<OutputType: Read>(OutputType);
 
-impl<InputType: Read> brotli::CustomRead<io::Error> for IntoIoReader<InputType> {
+impl<InputType: Read> simd_brotli::CustomRead<io::Error> for IntoIoReader<InputType> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         loop {
             match self.0.read(buf) {
@@ -196,7 +198,7 @@ where
     let mut alloc_u8 = HeapAllocator::default();
     let mut input_buffer = alloc_u8.alloc_cell(buffer_size);
     let mut output_buffer = alloc_u8.alloc_cell(buffer_size);
-    brotli::BrotliDecompressCustomIoCustomDict(
+    simd_brotli::BrotliDecompressCustomIoCustomDict(
         &mut IoReaderWrapper::<InputType>(r),
         &mut IoWriterWrapper::<OutputType>(w),
         input_buffer.slice_mut(),
@@ -252,7 +254,7 @@ where
     if ret != 0 {
         panic!("Unable to activate seccomp");
     }
-    match brotli::BrotliDecompressCustomIo(
+    match simd_brotli::BrotliDecompressCustomIo(
         &mut IoReaderWrapper::<InputType>(r),
         &mut IoWriterWrapper::<OutputType>(w),
         &mut alloc_u8.alloc_cell(buffer_size).slice_mut(),
@@ -274,7 +276,7 @@ where
 pub fn new_brotli_heap_alloc() -> HeapAllocator {
     HeapAllocator::default()
 }
-impl brotli::enc::BrotliAlloc for HeapAllocator {}
+impl simd_brotli::enc::BrotliAlloc for HeapAllocator {}
 pub fn compress_multi_nostd(
     input: Vec<u8>,
     output: &mut [u8],
@@ -382,7 +384,7 @@ pub fn compress<InputType, OutputType>(
     r: &mut InputType,
     w: &mut OutputType,
     buffer_size: usize,
-    params: &brotli::enc::BrotliEncoderParams,
+    params: &simd_brotli::enc::BrotliEncoderParams,
     custom_dictionary: &[u8],
     num_threads: usize,
 ) -> Result<usize, io::Error>
@@ -406,28 +408,29 @@ where
     let mut alloc_u8 = HeapAllocator::default();
     let mut input_buffer = alloc_u8.alloc_cell(buffer_size);
     let mut output_buffer = alloc_u8.alloc_cell(buffer_size);
-    let mut log =
-        |pm: &mut brotli::interface::PredictionModeContextMap<brotli::InputReferenceMut>,
-         data: &mut [brotli::interface::Command<brotli::SliceOffset>],
-         mb: brotli::InputPair,
-         _mfv: &mut HeapAllocator| {
-            let tmp = brotli::interface::Command::PredictionMode(
-                brotli::interface::PredictionModeContextMap::<brotli::InputReference> {
-                    literal_context_map: brotli::InputReference::from(&pm.literal_context_map),
-                    predmode_speed_and_distance_context_map: brotli::InputReference::from(
-                        &pm.predmode_speed_and_distance_context_map,
-                    ),
-                },
-            );
-            util::write_one(&tmp);
-            for cmd in data.iter() {
-                util::write_one(&cmd.thaw_pair(&mb));
-            }
-        };
+    let mut log = |pm: &mut simd_brotli::interface::PredictionModeContextMap<
+        simd_brotli::InputReferenceMut,
+    >,
+                   data: &mut [simd_brotli::interface::Command<simd_brotli::SliceOffset>],
+                   mb: simd_brotli::InputPair,
+                   _mfv: &mut HeapAllocator| {
+        let tmp = simd_brotli::interface::Command::PredictionMode(
+            simd_brotli::interface::PredictionModeContextMap::<simd_brotli::InputReference> {
+                literal_context_map: simd_brotli::InputReference::from(&pm.literal_context_map),
+                predmode_speed_and_distance_context_map: simd_brotli::InputReference::from(
+                    &pm.predmode_speed_and_distance_context_map,
+                ),
+            },
+        );
+        util::write_one(&tmp);
+        for cmd in data.iter() {
+            util::write_one(&cmd.thaw_pair(&mb));
+        }
+    };
     if params.log_meta_block {
         println_stderr!("window {} 0 0 0", params.lgwin);
     }
-    brotli::BrotliCompressCustomIoCustomDict(
+    simd_brotli::BrotliCompressCustomIoCustomDict(
         &mut IoReaderWrapper::<InputType>(r),
         &mut IoWriterWrapper::<OutputType>(w),
         input_buffer.slice_mut(),
@@ -443,7 +446,7 @@ where
 // This decompressor is defined unconditionally on whether std is defined
 // so we can exercise the code in any case
 pub struct BrotliDecompressor<R: Read>(
-    brotli::DecompressorCustomIo<
+    simd_brotli::DecompressorCustomIo<
         io::Error,
         IntoIoReader<R>,
         Rebox<u8>,
@@ -459,7 +462,7 @@ impl<R: Read> BrotliDecompressor<R> {
         let buffer = alloc_u8.alloc_cell(buffer_size);
         let alloc_u32 = HeapAllocator::default();
         let alloc_hc = HeapAllocator::default();
-        BrotliDecompressor::<R>(brotli::DecompressorCustomIo::<
+        BrotliDecompressor::<R>(simd_brotli::DecompressorCustomIo::<
             Error,
             IntoIoReader<R>,
             Rebox<u8>,
@@ -536,7 +539,7 @@ fn main() {
     let mut buffer_size = 65536;
     let mut do_compress = false;
     let mut do_validate = false;
-    let mut params = brotli::enc::BrotliEncoderInitParams();
+    let mut params = simd_brotli::enc::BrotliEncoderInitParams();
     let mut custom_dictionary = Vec::<u8>::new();
     let mut use_work_pool = has_stdlib();
     params.quality = 11; // default
