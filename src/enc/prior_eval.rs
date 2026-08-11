@@ -1,7 +1,7 @@
 use core;
 use core::cmp::min;
 
-use fearless_simd::{Level, Select, Simd, SimdBase, SimdInt, f32x8, i16x16};
+use fearless_simd::{Level, Select, Simd, SimdBase, f32x8, i16x16};
 
 use super::super::alloc;
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};

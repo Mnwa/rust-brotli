@@ -149,7 +149,7 @@ impl<SliceType: SliceWrapper<u8> + SliceWrapperMut<u8>> PredictionModeContextMap
     pub fn set_mixing_values(&mut self, mixing_mask: &[u8; NUM_MIXING_VALUES]) {
         let cm_slice = self.predmode_speed_and_distance_context_map.slice_mut();
         cm_slice[MIXING_OFFSET..(MIXING_OFFSET + NUM_MIXING_VALUES)]
-            .clone_from_slice(&mixing_mask[..]);
+            .copy_from_slice(&mixing_mask[..]);
     }
     #[inline]
     pub fn get_mixing_values_mut(&mut self) -> &mut [u8] {

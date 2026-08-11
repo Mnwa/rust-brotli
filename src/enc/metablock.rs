@@ -426,7 +426,7 @@ fn InitBlockSplitter<
             new_array = allocate::<u8, _>(alloc, _new_size);
             if (!split.types.slice().is_empty()) {
                 new_array.slice_mut()[..split.types.slice().len()]
-                    .clone_from_slice(split.types.slice());
+                    .copy_from_slice(split.types.slice());
             }
             <Alloc as Allocator<u8>>::free_cell(
                 alloc,
@@ -446,7 +446,7 @@ fn InitBlockSplitter<
             }
             let mut new_array = allocate::<u32, _>(alloc, _new_size);
             new_array.slice_mut()[..split.lengths.slice().len()]
-                .clone_from_slice(split.lengths.slice());
+                .copy_from_slice(split.lengths.slice());
             <Alloc as Allocator<u32>>::free_cell(
                 alloc,
                 core::mem::replace(&mut split.lengths, new_array),
@@ -510,7 +510,7 @@ fn InitContextBlockSplitter<
             let mut new_array = allocate::<u8, _>(alloc, _new_size);
             if (!split.types.slice().is_empty()) {
                 new_array.slice_mut()[..split.types.slice().len()]
-                    .clone_from_slice(split.types.slice());
+                    .copy_from_slice(split.types.slice());
             }
             <Alloc as Allocator<u8>>::free_cell(
                 alloc,
@@ -531,7 +531,7 @@ fn InitContextBlockSplitter<
             let mut new_array = allocate::<u32, _>(alloc, _new_size);
             if (!split.lengths.slice().is_empty()) {
                 new_array.slice_mut()[..split.lengths.slice().len()]
-                    .clone_from_slice(split.lengths.slice());
+                    .copy_from_slice(split.lengths.slice());
             }
             <Alloc as Allocator<u32>>::free_cell(
                 alloc,

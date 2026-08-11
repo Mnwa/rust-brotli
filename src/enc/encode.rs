@@ -652,9 +652,9 @@ fn InitCommandPrefixCodes(
         0x88, 0x54, 0x94, 0x46, 0xe1, 0xb0, 0xd0, 0x4e, 0xb2, 0xf7, 0x4, 0x0,
     ];
     static kDefaultCommandCodeNumBits: usize = 448usize;
-    cmd_depths[..].clone_from_slice(&kDefaultCommandDepths[..]);
-    cmd_bits[..].clone_from_slice(&kDefaultCommandBits[..]);
-    cmd_code[..kDefaultCommandCode.len()].clone_from_slice(&kDefaultCommandCode[..]);
+    cmd_depths[..].copy_from_slice(&kDefaultCommandDepths[..]);
+    cmd_bits[..].copy_from_slice(&kDefaultCommandBits[..]);
+    cmd_code[..kDefaultCommandCode.len()].copy_from_slice(&kDefaultCommandCode[..]);
     *cmd_code_numbits = kDefaultCommandCodeNumBits;
 }
 
@@ -718,7 +718,7 @@ fn RingBufferInitBuffer<AllocU8: alloc::Allocator<u8>>(
     if !rb.data_mo.slice().is_empty() {
         let lim: usize = ((2u32).wrapping_add(rb.cur_size_) as usize)
             .wrapping_add(kSlackForEightByteHashingEverywhere);
-        new_data.slice_mut()[..lim].clone_from_slice(&rb.data_mo.slice()[..lim]);
+        new_data.slice_mut()[..lim].copy_from_slice(&rb.data_mo.slice()[..lim]);
         m.free_cell(core::mem::take(&mut rb.data_mo));
     }
     let _ = core::mem::replace(&mut rb.data_mo, new_data);
@@ -744,7 +744,7 @@ fn RingBufferWriteTail<AllocU8: alloc::Allocator<u8>>(
         let p: usize = (rb.size_ as usize).wrapping_add(masked_pos);
         let begin = rb.buffer_index.wrapping_add(p);
         let lim = min(n, (rb.tail_size_ as usize).wrapping_sub(masked_pos));
-        rb.data_mo.slice_mut()[begin..(begin + lim)].clone_from_slice(&bytes[..lim]);
+        rb.data_mo.slice_mut()[begin..(begin + lim)].copy_from_slice(&bytes[..lim]);
     }
 }
 
@@ -757,8 +757,7 @@ fn RingBufferWrite<AllocU8: alloc::Allocator<u8>>(
     if rb.pos_ == 0u32 && (n < rb.tail_size_ as usize) {
         rb.pos_ = n as u32;
         RingBufferInitBuffer(m, rb.pos_, rb);
-        rb.data_mo.slice_mut()[rb.buffer_index..(rb.buffer_index + n)]
-            .clone_from_slice(&bytes[..n]);
+        rb.data_mo.slice_mut()[rb.buffer_index..(rb.buffer_index + n)].copy_from_slice(&bytes[..n]);
         return;
     }
     if rb.cur_size_ < rb.total_size_ {
@@ -778,18 +777,18 @@ fn RingBufferWrite<AllocU8: alloc::Allocator<u8>>(
         if masked_pos.wrapping_add(n) <= rb.size_ as usize {
             // a single write fits
             let start = rb.buffer_index.wrapping_add(masked_pos);
-            rb.data_mo.slice_mut()[start..(start + n)].clone_from_slice(&bytes[..n]);
+            rb.data_mo.slice_mut()[start..(start + n)].copy_from_slice(&bytes[..n]);
         } else {
             {
                 let start = rb.buffer_index.wrapping_add(masked_pos);
                 let mid = min(n, (rb.total_size_ as usize).wrapping_sub(masked_pos));
-                rb.data_mo.slice_mut()[start..(start + mid)].clone_from_slice(&bytes[..mid]);
+                rb.data_mo.slice_mut()[start..(start + mid)].copy_from_slice(&bytes[..mid]);
             }
             let xstart = rb.buffer_index.wrapping_add(0);
             let size = n.wrapping_sub((rb.size_ as usize).wrapping_sub(masked_pos));
             let bytes_start = (rb.size_ as usize).wrapping_sub(masked_pos);
             rb.data_mo.slice_mut()[xstart..(xstart + size)]
-                .clone_from_slice(&bytes[bytes_start..(bytes_start + size)]);
+                .copy_from_slice(&bytes[bytes_start..(bytes_start + size)]);
         }
     }
     let data_2 = rb.data_mo.slice()[rb
@@ -1423,7 +1422,7 @@ fn MakeUncompressedStream(input: &[u8], input_size: usize, output: &mut [u8]) ->
             result = result.wrapping_add(1);
         }
         output[result..(result + chunk_size as usize)]
-            .clone_from_slice(&input[offset..(offset + chunk_size as usize)]);
+            .copy_from_slice(&input[offset..(offset + chunk_size as usize)]);
         result = result.wrapping_add(chunk_size as usize);
         offset = offset.wrapping_add(chunk_size as usize);
         size = size.wrapping_sub(chunk_size as usize);
@@ -1584,7 +1583,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
         if self.available_out_ != 0usize && (*available_out != 0usize) {
             let copy_output_size: usize = min(self.available_out_, *available_out);
             (*next_out_array)[(*next_out_offset)..(*next_out_offset + copy_output_size)]
-                .clone_from_slice(&GetNextOut!(self)[..copy_output_size]);
+                .copy_from_slice(&GetNextOut!(self)[..copy_output_size]);
             //memcpy(*next_out, s.next_out_, copy_output_size);
             *next_out_offset = next_out_offset.wrapping_add(copy_output_size);
             *available_out = available_out.wrapping_sub(copy_output_size);
@@ -1996,7 +1995,7 @@ fn WriteMetaBlockInternal<Alloc: BrotliAlloc, Cb>(
         num_literals,
         num_commands,
     ) {
-        dist_cache[..4].clone_from_slice(&saved_dist_cache[..4]);
+        dist_cache[..4].copy_from_slice(&saved_dist_cache[..4]);
         store_uncompressed_meta_block(
             alloc,
             is_last,
@@ -2144,7 +2143,7 @@ fn WriteMetaBlockInternal<Alloc: BrotliAlloc, Cb>(
         mb.destroy(alloc);
     }
     if bytes + 4 + saved_byte_location < (*storage_ix >> 3) {
-        dist_cache[..4].clone_from_slice(&saved_dist_cache[..4]);
+        dist_cache[..4].copy_from_slice(&saved_dist_cache[..4]);
         //memcpy(dist_cache,
         //     saved_dist_cache,
         //     (4usize).wrapping_mul(::core::mem::size_of::<i32>()));
@@ -2411,7 +2410,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                 let mut new_commands = allocate::<Command, _>(&mut self.m8, newsize);
                 if !self.commands_.slice().is_empty() {
                     new_commands.slice_mut()[..self.num_commands_]
-                        .clone_from_slice(&self.commands_.slice()[..self.num_commands_]);
+                        .copy_from_slice(&self.commands_.slice()[..self.num_commands_]);
                     <Alloc as Allocator<Command>>::free_cell(
                         &mut self.m8,
                         core::mem::take(&mut self.commands_),
@@ -2541,7 +2540,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
             self.num_commands_ = 0usize;
             self.num_literals_ = 0usize;
             self.saved_dist_cache_
-                .clone_from_slice(self.dist_cache_.split_at(4).0);
+                .copy_from_slice(self.dist_cache_.split_at(4).0);
             self.next_out_ = NextOut::DynamicStorage(0); // this always returns that
             *out_size = storage_ix >> 3;
             true
@@ -2655,7 +2654,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                     let copy: u32 =
                         min(self.remaining_metadata_bytes_ as usize, *available_out) as u32;
                     next_out_array[*next_out_offset..(*next_out_offset + copy as usize)]
-                        .clone_from_slice(
+                        .copy_from_slice(
                             &next_in_array[*next_in_offset..(*next_in_offset + copy as usize)],
                         );
                     //memcpy(*next_out, *next_in, copy as usize);
@@ -2670,7 +2669,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                 } else {
                     let copy: u32 = min(self.remaining_metadata_bytes_, 16u32);
                     self.next_out_ = NextOut::TinyBuf(0);
-                    GetNextOut!(self)[..(copy as usize)].clone_from_slice(
+                    GetNextOut!(self)[..(copy as usize)].copy_from_slice(
                         &next_in_array[*next_in_offset..(*next_in_offset + copy as usize)],
                     );
                     //memcpy(s.next_out_, *next_in, copy as usize);

@@ -429,7 +429,7 @@ pub fn BrotliClusterHistograms<
                 }
                 new_array = alloc_or_default::<HistogramPair, _>(alloc, _new_size);
                 new_array.slice_mut()[..pairs_capacity]
-                    .clone_from_slice(&pairs.slice()[..pairs_capacity]);
+                    .copy_from_slice(&pairs.slice()[..pairs_capacity]);
                 <Alloc as Allocator<HistogramPair>>::free_cell(
                     alloc,
                     core::mem::replace(&mut pairs, new_array),

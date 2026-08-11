@@ -1,7 +1,7 @@
 use core;
 use core::cmp::{max, min};
 
-use fearless_simd::{Select, Simd, SimdBase, SimdFloat, SimdMask, f32x8, u32x8};
+use fearless_simd::{Select, Simd, SimdBase, SimdMask, f32x8, u32x8};
 
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;
@@ -96,14 +96,14 @@ fn CopyLiteralsToByteArray(
         if from_pos.wrapping_add(insert_len) > mask {
             let head_size: usize = mask.wrapping_add(1).wrapping_sub(from_pos);
             literals[pos..(pos + head_size)]
-                .clone_from_slice(&data[from_pos..(from_pos + head_size)]);
+                .copy_from_slice(&data[from_pos..(from_pos + head_size)]);
             from_pos = 0usize;
             pos = pos.wrapping_add(head_size);
             insert_len = insert_len.wrapping_sub(head_size);
         }
         if insert_len > 0usize {
             literals[pos..(pos + insert_len)]
-                .clone_from_slice(&data[from_pos..(from_pos + insert_len)]);
+                .copy_from_slice(&data[from_pos..(from_pos + insert_len)]);
             pos = pos.wrapping_add(insert_len);
         }
         from_pos = from_pos
@@ -566,7 +566,7 @@ fn ClusterBlocks<
                     }
                     let mut new_array = allocate::<u32, _>(alloc, _new_size);
                     new_array.slice_mut()[..cluster_size_capacity]
-                        .clone_from_slice(&cluster_size.slice()[..cluster_size_capacity]);
+                        .copy_from_slice(&cluster_size.slice()[..cluster_size_capacity]);
                     <Alloc as Allocator<u32>>::free_cell(
                         alloc,
                         core::mem::replace(&mut cluster_size, new_array),
@@ -681,7 +681,7 @@ fn ClusterBlocks<
             }
             let mut new_array = allocate::<u8, _>(alloc, _new_size);
             new_array.slice_mut()[..split.types_alloc_size()]
-                .clone_from_slice(&split.types.slice()[..split.types_alloc_size()]);
+                .copy_from_slice(&split.types.slice()[..split.types_alloc_size()]);
             <Alloc as Allocator<u8>>::free_cell(
                 alloc,
                 core::mem::replace(&mut split.types, new_array),
@@ -700,7 +700,7 @@ fn ClusterBlocks<
             }
             let mut new_array = allocate::<u32, _>(alloc, _new_size);
             new_array.slice_mut()[..split.lengths_alloc_size()]
-                .clone_from_slice(split.lengths.slice());
+                .copy_from_slice(split.lengths.slice());
             <Alloc as Allocator<u32>>::free_cell(
                 alloc,
                 core::mem::replace(&mut split.lengths, new_array),
@@ -779,7 +779,7 @@ fn SplitByteVector<
                 }
                 let mut new_array = allocate::<u8, _>(alloc, _new_size);
                 new_array.slice_mut()[..split.types_alloc_size()]
-                    .clone_from_slice(&split.types.slice()[..split.types_alloc_size()]);
+                    .copy_from_slice(&split.types.slice()[..split.types_alloc_size()]);
                 <Alloc as Allocator<u8>>::free_cell(
                     alloc,
                     core::mem::replace(&mut split.types, new_array),
@@ -798,7 +798,7 @@ fn SplitByteVector<
                 }
                 let mut new_array = allocate::<u32, _>(alloc, _new_size);
                 new_array.slice_mut()[..split.lengths_alloc_size()]
-                    .clone_from_slice(&split.lengths.slice()[..split.lengths_alloc_size()]);
+                    .copy_from_slice(&split.lengths.slice()[..split.lengths_alloc_size()]);
                 <Alloc as Allocator<u32>>::free_cell(
                     alloc,
                     core::mem::replace(&mut split.lengths, new_array),

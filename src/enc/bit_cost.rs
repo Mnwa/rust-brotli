@@ -1,7 +1,7 @@
 use crate::alloc::SliceWrapperMut;
 use core::cmp::{max, min};
 
-use fearless_simd::{Simd, SimdBase, SimdInt, SimdMask, u32x16};
+use fearless_simd::{Simd, SimdBase, SimdMask, u32x16};
 
 use super::super::alloc::SliceWrapper;
 use super::histogram::CostAccessors;
