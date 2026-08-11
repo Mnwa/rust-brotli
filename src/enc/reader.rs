@@ -1,4 +1,4 @@
-use alloc::{Allocator, SliceWrapperMut};
+use crate::alloc::{Allocator, SliceWrapperMut};
 #[cfg(feature = "std")]
 use std::io;
 #[cfg(feature = "std")]

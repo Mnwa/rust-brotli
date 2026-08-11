@@ -1,14 +1,14 @@
 use core;
 use core::cmp::min;
 
-use fearless_simd::{f32x8, i16x16, Level, Select, Simd, SimdBase, SimdInt};
+use fearless_simd::{Level, Select, Simd, SimdBase, SimdInt, f32x8, i16x16};
 
 use super::super::alloc;
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;
 use super::input_pair::{InputPair, InputReference, InputReferenceMut};
-use super::ir_interpret::{push_base, IRInterpreter};
-use super::util::{floatX, FastLog2u16};
+use super::ir_interpret::{IRInterpreter, push_base};
+use super::util::{FastLog2u16, floatX};
 use super::vectorization::detect_level;
 use super::{find_stride, interface, s16, v8};
 use crate::enc::combined_alloc::{alloc_default, alloc_if};

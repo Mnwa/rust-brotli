@@ -9,7 +9,7 @@
 use core::ops::{Index, IndexMut};
 use core::slice::SliceIndex;
 
-use fearless_simd::{f32x8, i16x16, i32x8, Level, Simd, SimdInto};
+use fearless_simd::{Level, Simd, SimdInto, f32x8, i16x16, i32x8};
 
 /// The instruction set the vectorized encoder paths run on.
 ///

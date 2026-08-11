@@ -41,21 +41,23 @@ mod weights;
 pub mod worker_pool;
 pub mod writer;
 
-pub use alloc::{AllocatedStackMemory, Allocator, SliceWrapper, SliceWrapperMut, StackAllocator};
+pub use crate::alloc::{
+    AllocatedStackMemory, Allocator, SliceWrapper, SliceWrapperMut, StackAllocator,
+};
 #[cfg(feature = "std")]
 use std::io;
 #[cfg(feature = "std")]
 use std::io::{Error, ErrorKind, Read, Write};
 
+pub use crate::interface::{InputPair, InputReference, InputReferenceMut};
 #[cfg(feature = "std")]
 pub use alloc_stdlib::StandardAlloc;
 use brotli_decompressor::{CustomRead, CustomWrite};
 #[cfg(feature = "std")]
 pub use brotli_decompressor::{IntoIoReader, IoReaderWrapper, IoWriterWrapper};
-pub use interface::{InputPair, InputReference, InputReferenceMut};
 
 pub use self::backward_references::{
-    hash_to_binary_tree, hq as backward_references_hq, BrotliEncoderParams, UnionHasher,
+    BrotliEncoderParams, UnionHasher, hash_to_binary_tree, hq as backward_references_hq,
 };
 pub use self::combined_alloc::{BrotliAlloc, CombiningAllocator};
 use self::encode::{BrotliEncoderDestroyInstance, BrotliEncoderOperation};
@@ -66,14 +68,14 @@ pub use self::hash_to_binary_tree::ZopfliNode;
 pub use self::interface::StaticCommand;
 pub use self::pdf::PDF;
 #[cfg(not(feature = "std"))]
-pub use self::singlethreading::{compress_worker_pool, new_work_pool, WorkerPool};
+pub use self::singlethreading::{WorkerPool, compress_worker_pool, new_work_pool};
 pub use self::threading::{
     BatchSpawnableLite, BrotliEncoderThreadError, CompressionThreadResult, Owned, SendAlloc,
 };
 pub use self::util::floatX;
-pub use self::vectorization::{v256, v256i, Mem256f};
+pub use self::vectorization::{Mem256f, v256, v256i};
 #[cfg(feature = "std")]
-pub use self::worker_pool::{compress_worker_pool, new_work_pool, WorkerPool};
+pub use self::worker_pool::{WorkerPool, compress_worker_pool, new_work_pool};
 use crate::enc::encode::BrotliEncoderStateStruct;
 
 pub type s16 = vectorization::Mem16x16;

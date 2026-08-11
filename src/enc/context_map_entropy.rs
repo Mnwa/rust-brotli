@@ -3,9 +3,9 @@ use core;
 use super::super::alloc;
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::input_pair::{InputPair, InputReference, InputReferenceMut};
-pub use super::ir_interpret::{push_base, Context, IRInterpreter};
-use super::util::{floatX, FastLog2u16};
-use super::weights::{Weights, BLEND_FIXED_POINT_PRECISION};
+pub use super::ir_interpret::{Context, IRInterpreter, push_base};
+use super::util::{FastLog2u16, floatX};
+use super::weights::{BLEND_FIXED_POINT_PRECISION, Weights};
 use super::{find_stride, interface};
 use crate::enc::combined_alloc::alloc_if;
 

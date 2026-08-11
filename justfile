@@ -73,5 +73,7 @@ ci-test: sys-info (fmt "--check") build test test-doc
 ci-test-msrv: sys-info build-brotli build-ffi test
 
 # Test if changes are backwards compatible (patch), or need a new minor/major version
+# `--default-features` matches CI: the default heuristic also enables `benchmark`, which the
+# published baseline cannot build because `/testdata` is not in the packaged crate.
 semver-checks:
-    cargo semver-checks
+    cargo semver-checks --default-features

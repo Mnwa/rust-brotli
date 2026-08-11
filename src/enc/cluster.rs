@@ -1,7 +1,7 @@
-use alloc::{Allocator, SliceWrapper, SliceWrapperMut};
+use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core::cmp::min;
 
-use {alloc, core};
+use crate::alloc;
 
 use super::bit_cost::BrotliPopulationCost;
 use super::histogram::{

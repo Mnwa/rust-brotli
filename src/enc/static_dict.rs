@@ -5,7 +5,7 @@ use super::super::dictionary::{
     kBrotliDictionary, kBrotliDictionaryOffsetsByLength, kBrotliDictionarySizeBitsByLength,
 };
 use super::static_dict_lut::{
-    kDictHashMul32, kDictNumBits, kStaticDictionaryBuckets, kStaticDictionaryWords, DictWord,
+    DictWord, kDictHashMul32, kDictNumBits, kStaticDictionaryBuckets, kStaticDictionaryWords,
 };
 #[allow(unused)]
 static kUppercaseFirst: u8 = 10u8;
@@ -69,7 +69,7 @@ pub fn BROTLI_UNALIGNED_STORE64(outp: &mut [u8], v: u64) {
 }
 
 macro_rules! sub_match {
-    ($s1 : expr, $s2 : expr, $limit : expr, $matched : expr, $split_pair1 : expr, $split_pair2 : expr, $s1_lo : expr, $s2_lo : expr, $s1_as_64 : expr, $s2_as_64 : expr, $vec_len: expr) => {
+    ($s1 : expr_2021, $s2 : expr_2021, $limit : expr_2021, $matched : expr_2021, $split_pair1 : expr_2021, $split_pair2 : expr_2021, $s1_lo : expr_2021, $s2_lo : expr_2021, $s1_as_64 : expr_2021, $s2_as_64 : expr_2021, $vec_len: expr_2021) => {
         $split_pair1 = $s1.split_at($vec_len);
         $s1_lo[..$vec_len].clone_from_slice($split_pair1.0);
         $s1 = $split_pair1.1;
@@ -93,7 +93,7 @@ macro_rules! sub_match {
 }
 
 macro_rules! sub_match8 {
-    ($s1 : expr, $s2 : expr, $limit : expr, $matched : expr, $s1_as_64 : expr, $s2_as_64 : expr) => {
+    ($s1 : expr_2021, $s2 : expr_2021, $limit : expr_2021, $matched : expr_2021, $s1_as_64 : expr_2021, $s2_as_64 : expr_2021) => {
         $limit -= 8;
         $s1_as_64 = BROTLI_UNALIGNED_LOAD64($s1);
         $s1 = $s1.split_at(8).1;

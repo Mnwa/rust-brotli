@@ -1,14 +1,14 @@
-use alloc::{Allocator, SliceWrapper, SliceWrapperMut};
+use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core;
 use core::cmp::min;
 
 use super::{
-    fix_unbroken_len, kHashMul32, AnyHasher, BrotliEncoderParams, CloneWithAlloc, H9Opts,
-    HasherSearchResult, HowPrepared, Struct1,
+    AnyHasher, BrotliEncoderParams, CloneWithAlloc, H9Opts, HasherSearchResult, HowPrepared,
+    Struct1, fix_unbroken_len, kHashMul32,
 };
 use crate::enc::combined_alloc::allocate;
 use crate::enc::static_dict::{
-    BrotliDictionary, FindMatchLengthWithLimit, BROTLI_UNALIGNED_LOAD32,
+    BROTLI_UNALIGNED_LOAD32, BrotliDictionary, FindMatchLengthWithLimit,
 };
 use crate::enc::util::floatX;
 
@@ -120,10 +120,10 @@ pub struct H10<
 }
 
 impl<
-        AllocU32: Allocator<u32>,
-        Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
-        Params: H10Params,
-    > PartialEq<H10<AllocU32, Buckets, Params>> for H10<AllocU32, Buckets, Params>
+    AllocU32: Allocator<u32>,
+    Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+> PartialEq<H10<AllocU32, Buckets, Params>> for H10<AllocU32, Buckets, Params>
 where
     Buckets: PartialEq<Buckets>,
 {
@@ -190,10 +190,10 @@ where
 }
 
 impl<
-        AllocU32: Allocator<u32>,
-        Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
-        Params: H10Params,
-    > H10<AllocU32, Buckets, Params>
+    AllocU32: Allocator<u32>,
+    Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+> H10<AllocU32, Buckets, Params>
 where
     Buckets: PartialEq<Buckets>,
 {
@@ -203,10 +203,10 @@ where
     }
 }
 impl<
-        Alloc: Allocator<u16> + Allocator<u32>,
-        Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
-        Params: H10Params,
-    > CloneWithAlloc<Alloc> for H10<Alloc, Buckets, Params>
+    Alloc: Allocator<u16> + Allocator<u32>,
+    Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+> CloneWithAlloc<Alloc> for H10<Alloc, Buckets, Params>
 where
     Buckets: PartialEq<Buckets>,
 {
@@ -229,10 +229,10 @@ where
 }
 
 impl<
-        AllocU32: Allocator<u32>,
-        Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
-        Params: H10Params,
-    > AnyHasher for H10<AllocU32, Buckets, Params>
+    AllocU32: Allocator<u32>,
+    Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+> AnyHasher for H10<AllocU32, Buckets, Params>
 where
     Buckets: PartialEq<Buckets>,
 {
@@ -401,12 +401,12 @@ impl<'a> BackwardMatchMut<'a> {
 }
 
 macro_rules! LeftChildIndexH10 {
-    ($xself: expr, $pos: expr) => {
+    ($xself: expr_2021, $pos: expr_2021) => {
         (2usize).wrapping_mul($pos & (*$xself).window_mask_)
     };
 }
 macro_rules! RightChildIndexH10 {
-    ($xself: expr, $pos: expr) => {
+    ($xself: expr_2021, $pos: expr_2021) => {
         (2usize)
             .wrapping_mul($pos & (*$xself).window_mask_)
             .wrapping_add(1)

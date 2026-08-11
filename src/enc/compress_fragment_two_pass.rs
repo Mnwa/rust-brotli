@@ -9,10 +9,10 @@ use super::entropy_encode::{
     BrotliConvertBitDepthsToSymbols, BrotliCreateHuffmanTree, HuffmanTree,
 };
 use super::static_dict::{
-    FindMatchLengthWithLimit, BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64,
-    BROTLI_UNALIGNED_STORE64,
+    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BROTLI_UNALIGNED_STORE64,
+    FindMatchLengthWithLimit,
 };
-use super::util::{floatX, Log2FloorNonZero};
+use super::util::{Log2FloorNonZero, floatX};
 static kCompressFragmentTwoPassBlockSize: usize = (1i32 << 17) as usize;
 
 // returns number of commands inserted
@@ -698,7 +698,7 @@ fn compress_fragment_two_pass_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     }
 }
 macro_rules! compress_specialization {
-    ($table_bits : expr, $fname: ident) => {
+    ($table_bits : expr_2021, $fname: ident) => {
         fn $fname<AllocHT: alloc::Allocator<HuffmanTree>>(
             mht: &mut AllocHT,
             input: &[u8],

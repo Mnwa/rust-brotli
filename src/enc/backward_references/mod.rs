@@ -8,12 +8,12 @@ use core::cmp::{max, min};
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::command::{BrotliDistanceParams, Command, ComputeDistanceCode};
 use super::dictionary_hash::kStaticDictionaryHash;
-use super::hash_to_binary_tree::{H10Buckets, H10DefaultParams, ZopfliNode, H10};
+use super::hash_to_binary_tree::{H10, H10Buckets, H10DefaultParams, ZopfliNode};
 use super::static_dict::{
-    BrotliDictionary, FindMatchLengthWithLimit, FindMatchLengthWithLimitMin4,
-    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64,
+    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BrotliDictionary, FindMatchLengthWithLimit,
+    FindMatchLengthWithLimitMin4,
 };
-use super::util::{floatX, Log2FloorNonZero};
+use super::util::{Log2FloorNonZero, floatX};
 use crate::enc::combined_alloc::allocate;
 
 pub static kInvalidMatch: u32 = 0x0fff_ffff;
@@ -941,9 +941,9 @@ pub struct AdvHasher<
 }
 
 impl<
-        Specialization: AdvHashSpecialization + Sized + Clone,
-        Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
-    > PartialEq<AdvHasher<Specialization, Alloc>> for AdvHasher<Specialization, Alloc>
+    Specialization: AdvHashSpecialization + Sized + Clone,
+    Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
+> PartialEq<AdvHasher<Specialization, Alloc>> for AdvHasher<Specialization, Alloc>
 {
     fn eq(&self, other: &Self) -> bool {
         self.GetHasherCommon == other.GetHasherCommon
@@ -1154,9 +1154,9 @@ fn BackwardReferencePenaltyUsingLastDistance(distance_short_code: usize) -> u64 
 }
 
 impl<
-        Specialization: AdvHashSpecialization + Clone,
-        Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
-    > AdvHasher<Specialization, Alloc>
+    Specialization: AdvHashSpecialization + Clone,
+    Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
+> AdvHasher<Specialization, Alloc>
 {
     // 7 opt
     // returns a new ix_start
@@ -1468,9 +1468,9 @@ impl<
 }
 
 impl<
-        Specialization: AdvHashSpecialization + Clone,
-        Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
-    > AnyHasher for AdvHasher<Specialization, Alloc>
+    Specialization: AdvHashSpecialization + Clone,
+    Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
+> AnyHasher for AdvHasher<Specialization, Alloc>
 {
     fn Opts(&self) -> H9Opts {
         self.h9_opts
@@ -2074,9 +2074,9 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
     }
 }
 impl<
-        Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
-        Special: AdvHashSpecialization + Sized + Clone,
-    > CloneWithAlloc<Alloc> for AdvHasher<Special, Alloc>
+    Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
+    Special: AdvHashSpecialization + Sized + Clone,
+> CloneWithAlloc<Alloc> for AdvHasher<Special, Alloc>
 {
     fn clone_with_alloc(&self, m: &mut Alloc) -> Self {
         let mut num = allocate::<u16, _>(m, self.num.len());
@@ -2178,7 +2178,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
     }
 }
 macro_rules! match_all_hashers_mut {
-    ($xself : expr, $func_call : ident, $( $args:expr),*) => {
+    ($xself : expr_2021, $func_call : ident, $( $args:expr_2021),*) => {
         match $xself {
      &mut UnionHasher::H2(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H3(ref mut hasher) => hasher.$func_call($($args),*),
@@ -2195,7 +2195,7 @@ macro_rules! match_all_hashers_mut {
     };
 }
 macro_rules! match_all_hashers {
-    ($xself : expr, $func_call : ident, $( $args:expr),*) => {
+    ($xself : expr_2021, $func_call : ident, $( $args:expr_2021),*) => {
         match $xself {
      &UnionHasher::H2(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H3(ref hasher) => hasher.$func_call($($args),*),
@@ -2218,9 +2218,9 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for UnionHa
     fn GetHasherCommon(&mut self) -> &mut Struct1 {
         match_all_hashers_mut!(self, GetHasherCommon,)
     } /*
-      fn GetH10Tree(&mut self) -> Option<&mut H10<AllocU32, H10Buckets, H10DefaultParams>> {
-        return match_all_hashers_mut!(self, GetH10Tree,);
-      }*/
+    fn GetH10Tree(&mut self) -> Option<&mut H10<AllocU32, H10Buckets, H10DefaultParams>> {
+    return match_all_hashers_mut!(self, GetH10Tree,);
+    }*/
     fn Prepare(&mut self, one_shot: bool, input_size: usize, data: &[u8]) -> HowPrepared {
         match_all_hashers_mut!(self, Prepare, one_shot, input_size, data)
     }

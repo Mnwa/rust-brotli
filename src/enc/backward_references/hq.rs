@@ -1,19 +1,19 @@
-use alloc::{Allocator, SliceWrapper, SliceWrapperMut};
+use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core;
 use core::cmp::{max, min};
 
 use super::hash_to_binary_tree::{
-    kInfinity, Allocable, BackwardMatch, BackwardMatchMut, H10Params, StoreAndFindMatchesH10,
-    Union1, ZopfliNode, H10,
+    Allocable, BackwardMatch, BackwardMatchMut, H10, H10Params, StoreAndFindMatchesH10, Union1,
+    ZopfliNode, kInfinity,
 };
 use super::{
-    fix_unbroken_len, kDistanceCacheIndex, kDistanceCacheOffset, kInvalidMatch, AnyHasher,
-    BrotliEncoderParams,
+    AnyHasher, BrotliEncoderParams, fix_unbroken_len, kDistanceCacheIndex, kDistanceCacheOffset,
+    kInvalidMatch,
 };
 use crate::enc::combined_alloc::{alloc_if, alloc_or_default};
 use crate::enc::command::{
-    combine_length_codes, BrotliDistanceParams, Command, GetCopyLengthCode, GetInsertLengthCode,
-    PrefixEncodeCopyDistance,
+    BrotliDistanceParams, Command, GetCopyLengthCode, GetInsertLengthCode,
+    PrefixEncodeCopyDistance, combine_length_codes,
 };
 use crate::enc::constants::{kCopyExtra, kInsExtra};
 use crate::enc::encode;
@@ -21,7 +21,7 @@ use crate::enc::literal_cost::BrotliEstimateBitCostsForLiterals;
 use crate::enc::static_dict::{
     BrotliDictionary, BrotliFindAllStaticDictionaryMatches, FindMatchLengthWithLimit,
 };
-use crate::enc::util::{floatX, FastLog2, FastLog2f64};
+use crate::enc::util::{FastLog2, FastLog2f64, floatX};
 
 const BROTLI_WINDOW_GAP: usize = 16;
 const BROTLI_MAX_STATIC_DICTIONARY_MATCH_LEN: usize = 37;
@@ -633,11 +633,7 @@ impl BackwardMatch {
     #[inline(always)]
     fn length_code(&self) -> usize {
         let code = (self.length_and_code() & 31u32) as usize;
-        if code != 0 {
-            code
-        } else {
-            self.length()
-        }
+        if code != 0 { code } else { self.length() }
     }
 }
 

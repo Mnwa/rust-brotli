@@ -1,7 +1,7 @@
 use core;
 use core::cmp::{max, min};
 
-use fearless_simd::{f32x8, Simd, SimdBase, SimdFloat, SimdMask};
+use fearless_simd::{Simd, SimdBase, SimdFloat, SimdMask, f32x8};
 
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;
@@ -14,7 +14,7 @@ use super::histogram::{
     HistogramClear, HistogramCommand, HistogramDistance, HistogramLiteral,
 };
 use super::util::FastLog2;
-use super::vectorization::{detect_level, Mem256f};
+use super::vectorization::{Mem256f, detect_level};
 use crate::enc::combined_alloc::allocate;
 use crate::enc::floatX;
 

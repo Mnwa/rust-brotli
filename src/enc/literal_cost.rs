@@ -1,6 +1,6 @@
 use core::cmp::min;
 
-use super::util::{floatX, FastLog2f64};
+use super::util::{FastLog2f64, floatX};
 use crate::enc::utf8_util::is_mostly_utf8;
 
 static kMinUTF8Ratio: floatX = 0.75;
