@@ -1,10 +1,12 @@
 use crate::alloc::SliceWrapperMut;
 use core::cmp::{max, min};
 
+use fearless_simd::{Simd, SimdBase, SimdInt, SimdMask, u32x8};
+
 use super::super::alloc::SliceWrapper;
 use super::histogram::CostAccessors;
 use super::util::{FastLog2, FastLog2u16};
-use super::vectorization::Mem256i;
+use super::vectorization::{Mem256i, detect_level};
 use crate::enc::floatX;
 
 const BROTLI_REPEAT_ZERO_CODE_LENGTH: usize = 17;
@@ -175,37 +177,109 @@ pub fn BrotliPopulationCost<HistogramType: SliceWrapper<u32> + CostAccessors>(
         }
         bits += CostComputation(&mut depth_histo, nnz_data, nnz, total_count, log2total);
     } else {
-        let mut max_depth: usize = 1;
-        let mut depth_histo = [0u32; 18];
+        let mut depth_histo = [0u32; BROTLI_CODE_LENGTH_CODES];
         let log2total: floatX = FastLog2(histogram.total_count() as u64); // 64 bit here
-        let mut reps: u32 = 0;
-        for histo in histogram.slice()[..data_size].iter() {
-            if *histo != 0 {
-                if reps != 0 {
-                    if reps < 3 {
-                        depth_histo[0] += reps;
-                    } else {
-                        reps -= 2;
-                        while reps > 0 {
-                            depth_histo[17] += 1;
-                            bits += 3.0;
-                            reps >>= 3;
-                        }
-                    }
-                    reps = 0;
-                }
-                let log2p = log2total - FastLog2u16(*histo as u16);
-                let mut depth = (log2p + 0.5) as usize;
-                bits += *histo as floatX * log2p;
-                depth = min(depth, 15);
-                max_depth = max(depth, max_depth);
-                depth_histo[depth] += 1;
-            } else {
-                reps += 1;
-            }
-        }
+        let max_depth = dispatch!(detect_level(), simd => accumulate_symbol_costs(
+            simd,
+            &histogram.slice()[..data_size],
+            log2total,
+            &mut bits,
+            &mut depth_histo,
+        ));
         bits += (18usize).wrapping_add((2usize).wrapping_mul(max_depth)) as floatX;
-        bits += BitsEntropy(&depth_histo[..], 18);
+        bits += BitsEntropy(&depth_histo[..], BROTLI_CODE_LENGTH_CODES);
     }
     bits
+}
+
+/// Charges one populated bucket, first flushing the run of empty buckets before it.
+///
+/// Split out of [`accumulate_symbol_costs`] so the vectorized and remainder walks share it,
+/// which keeps `bits` accumulating in bucket order and therefore bit-identical.
+#[inline(always)]
+fn accumulate_one_symbol(
+    histo: u32,
+    log2total: floatX,
+    bits: &mut floatX,
+    max_depth: &mut usize,
+    reps: &mut u32,
+    depth_histo: &mut [u32; BROTLI_CODE_LENGTH_CODES],
+) {
+    if *reps != 0 {
+        if *reps < 3 {
+            depth_histo[0] += *reps;
+        } else {
+            let mut remaining = *reps - 2;
+            while remaining > 0 {
+                depth_histo[BROTLI_REPEAT_ZERO_CODE_LENGTH] += 1;
+                *bits += 3.0;
+                remaining >>= 3;
+            }
+        }
+        *reps = 0;
+    }
+    let log2p = log2total - FastLog2u16(histo as u16);
+    let depth = min((log2p + 0.5) as usize, 15);
+    *bits += histo as floatX * log2p;
+    *max_depth = max(depth, *max_depth);
+    depth_histo[depth] += 1;
+}
+
+/// Charges every populated bucket of `histogram`, returning the deepest code length seen.
+///
+/// Histograms are mostly empty — a distance alphabet has 544 buckets and a metablock
+/// rarely touches a tenth of them — so the walk tests eight buckets per compare and only
+/// falls back to per-bucket work for the ones that are actually populated. Empty runs
+/// still land in `depth_histo` exactly as a bucket-at-a-time scan would leave them.
+#[inline(always)]
+fn accumulate_symbol_costs<S: Simd>(
+    simd: S,
+    histogram: &[u32],
+    log2total: floatX,
+    bits: &mut floatX,
+    depth_histo: &mut [u32; BROTLI_CODE_LENGTH_CODES],
+) -> usize {
+    let mut max_depth: usize = 1;
+    let mut reps: u32 = 0;
+    let empty = u32x8::splat(simd, 0);
+
+    let mut buckets = histogram.chunks_exact(8);
+    for chunk in &mut buckets {
+        let mut populated = !u32x8::from_slice(simd, chunk).simd_eq(empty).to_bitmask() & 0xff;
+        if populated == 0 {
+            reps += 8;
+            continue;
+        }
+        let mut scanned = 0u32;
+        while populated != 0 {
+            let lane = populated.trailing_zeros();
+            reps += lane - scanned;
+            scanned = lane + 1;
+            populated &= populated - 1;
+            accumulate_one_symbol(
+                chunk[lane as usize],
+                log2total,
+                bits,
+                &mut max_depth,
+                &mut reps,
+                depth_histo,
+            );
+        }
+        reps += 8 - scanned;
+    }
+    for &histo in buckets.remainder() {
+        if histo != 0 {
+            accumulate_one_symbol(
+                histo,
+                log2total,
+                bits,
+                &mut max_depth,
+                &mut reps,
+                depth_histo,
+            );
+        } else {
+            reps += 1;
+        }
+    }
+    max_depth
 }

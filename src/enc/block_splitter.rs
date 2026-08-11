@@ -1,7 +1,7 @@
 use core;
 use core::cmp::{max, min};
 
-use fearless_simd::{Simd, SimdBase, SimdFloat, SimdMask, f32x8};
+use fearless_simd::{Select, Simd, SimdBase, SimdFloat, SimdMask, f32x8, u32x8};
 
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;
@@ -14,9 +14,12 @@ use super::histogram::{
     HistogramClear, HistogramCommand, HistogramDistance, HistogramLiteral,
 };
 use super::util::FastLog2;
-use super::vectorization::{Mem256f, detect_level};
+use super::vectorization::{Mem256f, detect_level, min_lane_f32x8, min_lane_u32x8};
 use crate::enc::combined_alloc::allocate;
 use crate::enc::floatX;
+
+/// Lane offsets, added to a vector's base index to recover a histogram id.
+static LANE_INDICES: [u32; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
 
 static kMaxLiteralHistograms: usize = 100usize;
 
@@ -303,23 +306,35 @@ where
         let mut block_switch_cost: floatX = block_switch_bitcost;
         // main (vectorized) loop
         let insert_cost_slice = insert_cost.split_at(insert_cost_ix).1;
-        for (v_index, cost_iter) in cost
-            .split_at_mut(num_histograms >> 3)
-            .0
-            .iter_mut()
-            .enumerate()
-        {
+        let num_vectors = num_histograms >> 3;
+        // Running per-lane winner, reduced across lanes once the row is done rather than
+        // once per vector.
+        let mut min_lanes = f32x8::splat(simd, min_cost);
+        let mut id_lanes = u32x8::splat(simd, u32::MAX);
+        for (v_index, cost_iter) in cost.split_at_mut(num_vectors).0.iter_mut().enumerate() {
             let base_index = v_index << 3;
-            let mut local_insert_cost = [0.0; 8];
-            local_insert_cost
-                .clone_from_slice(insert_cost_slice.split_at(base_index).1.split_at(8).0);
-            for sub_index in 0usize..8usize {
-                cost_iter[sub_index] += local_insert_cost[sub_index];
-                let final_cost = cost_iter[sub_index];
-                if final_cost < min_cost {
-                    min_cost = final_cost;
-                    *block_id_ptr = (base_index + sub_index) as u8;
-                }
+            let updated = cost_iter.to_simd(simd)
+                + f32x8::from_slice(simd, insert_cost_slice.split_at(base_index).1.split_at(8).0);
+            *cost_iter = Mem256f::from_simd(updated);
+            // Strictly less, so a lane keeps the earliest histogram it tied with, exactly
+            // as the scalar scan this replaces did.
+            let improved = updated.simd_lt(min_lanes);
+            min_lanes = improved.select(updated, min_lanes);
+            id_lanes = improved.select(
+                u32x8::from_slice(simd, &LANE_INDICES) + base_index as u32,
+                id_lanes,
+            );
+        }
+        if num_vectors != 0 {
+            let best = min_lane_f32x8(min_lanes);
+            if best < min_cost {
+                min_cost = best;
+                // Ties between lanes go to the lowest histogram id, again matching a scan.
+                *block_id_ptr = min_lane_u32x8(
+                    min_lanes
+                        .simd_eq(f32x8::splat(simd, best))
+                        .select(id_lanes, u32x8::splat(simd, u32::MAX)),
+                ) as u8;
             }
         }
         let vectorized_offset = ((num_histograms >> 3) << 3);

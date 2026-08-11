@@ -9,15 +9,47 @@
 use core::ops::{Index, IndexMut};
 use core::slice::SliceIndex;
 
-use fearless_simd::{Level, Simd, SimdInto, f32x8, i16x16, i32x8};
+use fearless_simd::{
+    Level, Simd, SimdBase, SimdFloat, SimdInt, SimdInto, f32x8, i16x16, i32x8, u32x8,
+};
 
 /// The instruction set the vectorized encoder paths run on.
 ///
 /// Detected at runtime where the platform allows it (`std` builds, wasm), otherwise the
-/// best level this crate was compiled for.
+/// best level this crate was compiled for. The `std` answer is cached: probing costs a
+/// dozen feature tests, and callers such as [`crate::enc::bit_cost::BrotliPopulationCost`]
+/// dispatch once per histogram, deep inside the clustering loops.
+#[cfg(feature = "std")]
+#[inline]
+pub fn detect_level() -> Level {
+    static LEVEL: std::sync::OnceLock<Level> = std::sync::OnceLock::new();
+    *LEVEL.get_or_init(|| Level::try_detect().unwrap_or_else(Level::baseline))
+}
+
+/// See the `std` variant above; without `std` there is nothing to cache, as
+/// `try_detect` cannot probe the CPU and always resolves to the compiled-for level.
+#[cfg(not(feature = "std"))]
 #[inline]
 pub fn detect_level() -> Level {
     Level::try_detect().unwrap_or_else(Level::baseline)
+}
+
+/// The smallest lane of `v`, folded in `log2(8)` steps.
+#[inline(always)]
+pub fn min_lane_f32x8<S: Simd>(v: f32x8<S>) -> f32 {
+    let v = v.min(v.slide::<4>(v));
+    let v = v.min(v.slide::<2>(v));
+    let v = v.min(v.slide::<1>(v));
+    v[0]
+}
+
+/// The smallest lane of `v`, folded in `log2(8)` steps.
+#[inline(always)]
+pub fn min_lane_u32x8<S: Simd>(v: u32x8<S>) -> u32 {
+    let v = v.min(v.slide::<4>(v));
+    let v = v.min(v.slide::<2>(v));
+    let v = v.min(v.slide::<1>(v));
+    v[0]
 }
 
 macro_rules! define_vector {
