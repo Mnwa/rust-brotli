@@ -1,6 +1,6 @@
 use core::cmp::{max, min};
 
-use fearless_simd::{Simd, SimdBase, SimdInt, SimdMask, u8x32};
+use fearless_simd::{Simd, SimdBase, SimdMask, u8x32};
 
 pub const kNumDistanceCacheEntries: usize = 4;
 

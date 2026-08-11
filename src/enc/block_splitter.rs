@@ -1,7 +1,7 @@
 use core;
 use core::cmp::{max, min};
 
-use fearless_simd::{Select, Simd, SimdBase, SimdFloat, SimdMask, f32x8, u32x8};
+use fearless_simd::{Select, Simd, SimdBase, SimdMask, f32x8, u32x8};
 
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;

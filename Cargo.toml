@@ -44,7 +44,7 @@ incremental = false
 "alloc-stdlib" = { version = "~0.2", optional = true }
 "brotli-decompressor" = { version = "~5.0", default-features = false }
 # `libm` is what makes the no-stdlib build possible; the `std` feature below overrides it.
-"fearless_simd" = { version = "~0.6", default-features = false, features = ["libm"] }
+"fearless_simd" = { version = "~0.7", default-features = false, features = ["libm"] }
 
 "sha2" = { version = "~0.11", optional = true }
 
