@@ -311,7 +311,7 @@ where
 {
     let input = if let InternalSendAlloc::A(ref mut alloc, ref _extra) = alloc_per_thread[0].0 {
         let mut input = allocate::<u8, _>(alloc, input_slice.len());
-        input.slice_mut().clone_from_slice(input_slice);
+        input.slice_mut().copy_from_slice(input_slice);
         input
     } else {
         alloc_default::<u8, Alloc>()

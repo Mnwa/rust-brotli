@@ -290,8 +290,8 @@ where
         };
         ret.buckets_
             .slice_mut()
-            .clone_from_slice(self.buckets_.slice());
-        ret.forest.slice_mut().clone_from_slice(self.forest.slice());
+            .copy_from_slice(self.buckets_.slice());
+        ret.forest.slice_mut().copy_from_slice(self.forest.slice());
         ret
     }
 }

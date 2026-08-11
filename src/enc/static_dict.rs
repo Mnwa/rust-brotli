@@ -36,7 +36,7 @@ pub fn BrotliGetDictionary() -> &'static BrotliDictionary {
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_LOAD32(sl: &[u8]) -> u32 {
     let mut p = [0u8; 4];
-    p[..].clone_from_slice(sl.split_at(4).0);
+    p[..].copy_from_slice(sl.split_at(4).0);
     (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16) | ((p[3] as u32) << 24)
 }
 #[inline(always)]
@@ -47,7 +47,7 @@ pub fn Hash(data: &[u8]) -> u32 {
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_LOAD64(sl: &[u8]) -> u64 {
     let mut p = [0u8; 8];
-    p[..].clone_from_slice(sl.split_at(8).0);
+    p[..].copy_from_slice(sl.split_at(8).0);
     (p[0] as u64)
         | ((p[1] as u64) << 8)
         | ((p[2] as u64) << 16)
@@ -69,16 +69,16 @@ pub fn BROTLI_UNALIGNED_STORE64(outp: &mut [u8], v: u64) {
         ((v >> 48) & 0xff) as u8,
         ((v >> 56) & 0xff) as u8,
     ];
-    outp.split_at_mut(8).0.clone_from_slice(&p[..]);
+    outp.split_at_mut(8).0.copy_from_slice(&p[..]);
 }
 
 macro_rules! sub_match {
     ($s1 : expr_2021, $s2 : expr_2021, $limit : expr_2021, $matched : expr_2021, $split_pair1 : expr_2021, $split_pair2 : expr_2021, $s1_lo : expr_2021, $s2_lo : expr_2021, $s1_as_64 : expr_2021, $s2_as_64 : expr_2021, $vec_len: expr_2021) => {
         $split_pair1 = $s1.split_at($vec_len);
-        $s1_lo[..$vec_len].clone_from_slice($split_pair1.0);
+        $s1_lo[..$vec_len].copy_from_slice($split_pair1.0);
         $s1 = $split_pair1.1;
         $split_pair2 = $s2.split_at($vec_len);
-        $s2_lo[..$vec_len].clone_from_slice($split_pair2.0);
+        $s2_lo[..$vec_len].copy_from_slice($split_pair2.0);
         $s2 = $split_pair2.1;
         $limit -= $vec_len;
         for index in 0..($vec_len >> 3) {
@@ -1422,7 +1422,7 @@ pub fn BrotliFindAllStaticDictionaryMatches(
 mod test {
     #[allow(unused)]
     fn construct_situation(seed: &[u8], mut output: &mut [u8], limit: usize, matchfor: usize) {
-        output[..].clone_from_slice(seed);
+        output[..].copy_from_slice(seed);
         if matchfor >= limit {
             return;
         }

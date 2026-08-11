@@ -156,7 +156,7 @@ impl<'a, Alloc: BrotliAlloc> interface::CommandProcessor<'a> for CommandQueue<'a
             tmp.slice_mut()
                 .split_at_mut(self.queue.slice().len())
                 .0
-                .clone_from_slice(self.queue.slice());
+                .copy_from_slice(self.queue.slice());
             <Alloc as Allocator<StaticCommand>>::free_cell(
                 self.mc,
                 core::mem::replace(&mut self.queue, tmp),
@@ -230,7 +230,7 @@ fn process_command_queue<'a, CmdProcessor: interface::CommandProcessor<'a>>(
 ) -> RecoderState {
     let mut input_iter = input;
     let mut local_dist_cache = [0i32; kNumDistanceCacheEntries];
-    local_dist_cache.clone_from_slice(&dist_cache[..]);
+    local_dist_cache.copy_from_slice(&dist_cache[..]);
     let mut btypel_counter = 0usize;
     let mut btypec_counter = 0usize;
     let mut btyped_counter = 0usize;
@@ -377,8 +377,8 @@ fn process_command_queue<'a, CmdProcessor: interface::CommandProcessor<'a>>(
             if prev_dist_index != 1 || dist_offset != 0 {
                 // update distance cache unless it's the "0 distance symbol"
                 let mut tmp_dist_cache = [0i32; kNumDistanceCacheEntries - 1];
-                tmp_dist_cache.clone_from_slice(&local_dist_cache[..kNumDistanceCacheEntries - 1]);
-                local_dist_cache[1..].clone_from_slice(&tmp_dist_cache[..]);
+                tmp_dist_cache.copy_from_slice(&local_dist_cache[..kNumDistanceCacheEntries - 1]);
+                local_dist_cache[1..].copy_from_slice(&tmp_dist_cache[..]);
                 local_dist_cache[0] = final_distance as i32;
             }
         }
@@ -2798,10 +2798,10 @@ pub(crate) fn store_uncompressed_meta_block<Cb, Alloc: BrotliAlloc>(
     BrotliStoreUncompressedMetaBlockHeader(len, storage_ix, storage);
     JumpToByteBoundary(storage_ix, storage);
     let dst_start0 = (*storage_ix >> 3);
-    storage[dst_start0..(dst_start0 + input0.len())].clone_from_slice(input0);
+    storage[dst_start0..(dst_start0 + input0.len())].copy_from_slice(input0);
     *storage_ix = storage_ix.wrapping_add(input0.len() << 3);
     let dst_start1 = (*storage_ix >> 3);
-    storage[dst_start1..(dst_start1 + input1.len())].clone_from_slice(input1);
+    storage[dst_start1..(dst_start1 + input1.len())].copy_from_slice(input1);
     *storage_ix = storage_ix.wrapping_add(input1.len() << 3);
     BrotliWriteBitsPrepareStorage(*storage_ix, storage);
     if params.log_meta_block && !suppress_meta_block_logging {

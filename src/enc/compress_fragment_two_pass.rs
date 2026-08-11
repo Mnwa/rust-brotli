@@ -250,7 +250,7 @@ fn CreateCommands(
                 ip_index = ip_index.wrapping_add(matched);
                 *num_commands += EmitInsertLen(insert as u32, commands);
                 (*literals)[..(insert as usize)]
-                    .clone_from_slice(&base_ip[next_emit..(next_emit + insert as usize)]);
+                    .copy_from_slice(&base_ip[next_emit..(next_emit + insert as usize)]);
                 *num_literals += insert as usize;
                 let new_literals = core::mem::take(literals);
                 let _ = core::mem::replace(literals, &mut new_literals[(insert as usize)..]);
@@ -378,7 +378,7 @@ fn CreateCommands(
         let insert: u32 = ip_end.wrapping_sub(next_emit) as u32;
         *num_commands += EmitInsertLen(insert, commands);
         literals[..insert as usize]
-            .clone_from_slice(&base_ip[next_emit..(next_emit + insert as usize)]);
+            .copy_from_slice(&base_ip[next_emit..(next_emit + insert as usize)]);
         let mut xliterals = core::mem::take(literals);
         *literals = &mut core::mem::take(&mut xliterals)[(insert as usize)..];
         *num_literals += insert as usize;

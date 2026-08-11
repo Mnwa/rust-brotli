@@ -21,7 +21,7 @@ pub struct BroccoliState {
 impl Clone for BroccoliState {
     fn clone(&self) -> BroccoliState {
         let mut cd = [0u8; 120];
-        cd.clone_from_slice(&self.current_data[..]);
+        cd.copy_from_slice(&self.current_data[..]);
         BroccoliState {
             more_data: self.more_data,
             current_data: cd,

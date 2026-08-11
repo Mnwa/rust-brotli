@@ -1256,7 +1256,7 @@ impl<
             let shift = self.specialization.hash_shift();
             for chunk_id in 0..del {
                 let ix_offset = ix_start + chunk_id * REG_SIZE;
-                data64[..REG_SIZE + lookahead4 - 1].clone_from_slice(
+                data64[..REG_SIZE + lookahead4 - 1].copy_from_slice(
                     data.split_at(ix_offset)
                         .1
                         .split_at(REG_SIZE + lookahead4 - 1)
@@ -1345,7 +1345,7 @@ impl<
             for chunk_id in 0..del {
                 let ix_offset = ix_start + chunk_id * REG_SIZE;
                 data64[..REG_SIZE + lookahead4]
-                    .clone_from_slice(data.split_at(ix_offset).1.split_at(REG_SIZE + lookahead4).0);
+                    .copy_from_slice(data.split_at(ix_offset).1.split_at(REG_SIZE + lookahead4).0);
                 for quad_index in 0..(REG_SIZE >> 2) {
                     let i = quad_index << 2;
                     let ffffffff = 0xffff_ffff;
@@ -1429,7 +1429,7 @@ impl<
             for chunk_id in 0..del {
                 let ix_offset = ix_start + chunk_id * REG_SIZE;
                 data64[..REG_SIZE + lookahead4]
-                    .clone_from_slice(data.split_at(ix_offset).1.split_at(REG_SIZE + lookahead4).0);
+                    .copy_from_slice(data.split_at(ix_offset).1.split_at(REG_SIZE + lookahead4).0);
                 for i in 0..REG_SIZE {
                     let mixed_word = ((u32::from(data64[i])
                         | (u32::from(data64[i + 1]) << 8)
@@ -2001,7 +2001,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
         ret.buckets_
             .buckets_
             .slice_mut()
-            .clone_from_slice(self.buckets_.buckets_.slice());
+            .copy_from_slice(self.buckets_.buckets_.slice());
         ret
     }
 }
@@ -2019,7 +2019,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
         ret.buckets_
             .buckets_
             .slice_mut()
-            .clone_from_slice(self.buckets_.buckets_.slice());
+            .copy_from_slice(self.buckets_.buckets_.slice());
         ret
     }
 }
@@ -2037,7 +2037,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
         ret.buckets_
             .buckets_
             .slice_mut()
-            .clone_from_slice(self.buckets_.buckets_.slice());
+            .copy_from_slice(self.buckets_.buckets_.slice());
         ret
     }
 }
@@ -2055,16 +2055,16 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
         ret.buckets_
             .buckets_
             .slice_mut()
-            .clone_from_slice(self.buckets_.buckets_.slice());
+            .copy_from_slice(self.buckets_.buckets_.slice());
         ret
     }
 }
 impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc> for H9<Alloc> {
     fn clone_with_alloc(&self, m: &mut Alloc) -> Self {
         let mut num = allocate::<u16, _>(m, self.num_.len());
-        num.slice_mut().clone_from_slice(self.num_.slice());
+        num.slice_mut().copy_from_slice(self.num_.slice());
         let mut buckets = allocate::<u32, _>(m, self.buckets_.len());
-        buckets.slice_mut().clone_from_slice(self.buckets_.slice());
+        buckets.slice_mut().copy_from_slice(self.buckets_.slice());
         H9::<Alloc> {
             num_: num,
             buckets_: buckets,
@@ -2080,9 +2080,9 @@ impl<
 {
     fn clone_with_alloc(&self, m: &mut Alloc) -> Self {
         let mut num = allocate::<u16, _>(m, self.num.len());
-        num.slice_mut().clone_from_slice(self.num.slice());
+        num.slice_mut().copy_from_slice(self.num.slice());
         let mut buckets = allocate::<u32, _>(m, self.buckets.len());
-        buckets.slice_mut().clone_from_slice(self.buckets.slice());
+        buckets.slice_mut().copy_from_slice(self.buckets.slice());
         AdvHasher::<Special, Alloc> {
             GetHasherCommon: self.GetHasherCommon.clone(),
             specialization: self.specialization.clone(),

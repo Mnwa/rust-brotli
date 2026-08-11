@@ -708,7 +708,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     'continue_to_next_block: loop {
         let mut ip_index: usize;
         if code_block_selection == CodeBlockState::EMIT_COMMANDS {
-            cmd_histo[..128].clone_from_slice(&kCmdHistoSeed[..]);
+            cmd_histo[..128].copy_from_slice(&kCmdHistoSeed[..]);
             ip_index = input_index;
             last_distance = -1i32;
             ip_end = input_index.wrapping_add(block_size);
