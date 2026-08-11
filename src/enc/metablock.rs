@@ -130,6 +130,7 @@ fn ComputeDistanceCost(
     true
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliBuildMetaBlock<Alloc: BrotliAlloc>(
     alloc: &mut Alloc,
     ringbuffer: &[u8],
@@ -1019,6 +1020,7 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
         MapStaticContexts(alloc, num_contexts, static_context_map, mb);
     }
 }
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliBuildMetaBlockGreedy<
     Alloc: alloc::Allocator<u8>
         + alloc::Allocator<u32>
@@ -1073,6 +1075,7 @@ pub fn BrotliBuildMetaBlockGreedy<
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliOptimizeHistograms<
     Alloc: alloc::Allocator<u8>
         + alloc::Allocator<u32>

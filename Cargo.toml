@@ -48,6 +48,10 @@ incremental = false
 
 "sha2" = { version = "~0.11", optional = true }
 
+# Profiling instrumentation. Inert unless the `hotpath` feature is on: every call site is
+# behind `cfg_attr`, so a default build never links it.
+"hotpath" = { version = "~0.23", optional = true }
+
 [dev-dependencies]
 # The test suite (src/enc/test.rs) builds calloc-backed memory pools, which on
 # alloc-no-stdlib 3.x live behind its "unsafe" feature (always present on 2.x).
@@ -64,6 +68,13 @@ external-literal-probability = []
 ffi-api = ["brotli-decompressor/ffi-api"]
 float64 = []
 floating_point_context_mixing = []
+# Wall-clock profiling of the encoder pipeline. Requires `std`; run the `brotli` binary with
+# `--features hotpath` and it prints a per-stage table on exit.
+hotpath = ["dep:hotpath", "hotpath/hotpath", "std"]
+# Same, but measuring allocation counts/bytes instead of time (installs a counting allocator).
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
+# Same, but measuring CPU time instead of wall-clock.
+hotpath-cpu = ["hotpath", "hotpath/hotpath-cpu"]
 no-stdlib-ffi-binding = []
 pass-through-ffi-panics = []
 seccomp = ["brotli-decompressor/seccomp"]

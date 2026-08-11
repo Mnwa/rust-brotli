@@ -2550,6 +2550,7 @@ fn CreateBackwardReferences<AH: AnyHasher>(
     *last_insert_len = insert_length;
     *num_commands = num_commands.wrapping_add(new_commands_count);
 }
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliCreateBackwardReferences<
     Alloc: alloc::Allocator<u16>
         + alloc::Allocator<u32>

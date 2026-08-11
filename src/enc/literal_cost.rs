@@ -175,6 +175,7 @@ fn EstimateBitCostsForLiteralsUTF8(
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliEstimateBitCostsForLiterals(
     pos: usize,
     len: usize,

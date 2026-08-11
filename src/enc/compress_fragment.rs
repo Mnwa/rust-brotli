@@ -647,6 +647,7 @@ fn BuildAndStoreCommandPrefixCode(
 }
 
 #[allow(unused_assignments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     m: &mut AllocHT,
     input_ptr: &[u8],

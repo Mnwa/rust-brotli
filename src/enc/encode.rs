@@ -809,6 +809,7 @@ fn RingBufferWrite<AllocU8: alloc::Allocator<u8>>(
 }
 
 impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn copy_input_to_ring_buffer(&mut self, input_size: usize, input_buffer: &[u8]) {
         if !self.ensure_initialized() {
             return;
@@ -1433,6 +1434,7 @@ fn MakeUncompressedStream(input: &[u8], input_size: usize, output: &mut [u8]) ->
 }
 
 #[cfg_attr(not(feature = "ffi-api"), cfg(test))]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn encoder_compress<
     Alloc: BrotliAlloc,
     MetablockCallback: FnMut(
@@ -1714,6 +1716,7 @@ fn MaxMetablockSize(params: &BrotliEncoderParams) -> usize {
     1 << min(ComputeRbBits(params), 24)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ChooseContextMap(
     quality: i32,
     bigram_histo: &mut [u32],
@@ -1870,6 +1873,7 @@ fn ShouldUseComplexStaticContextMap(
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn DecideOverLiteralContextModeling(
     input: &[u8],
     mut start_pos: usize,
@@ -1938,6 +1942,7 @@ fn WriteEmptyLastBlocksInternal(
         BrotliWriteEmptyLastMetaBlock(storage_ix, storage)
     }
 }
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn WriteMetaBlockInternal<Alloc: BrotliAlloc, Cb>(
     alloc: &mut Alloc,
     data: &[u8],
@@ -2211,6 +2216,7 @@ fn ChooseDistanceParams(params: &mut BrotliEncoderParams) {
 }
 
 impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn encode_data<MetablockCallback>(
         &mut self,
         is_last: bool,
@@ -2705,6 +2711,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
         );
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn compress_stream_fast(
         &mut self,
         op: BrotliEncoderOperation,

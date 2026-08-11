@@ -97,6 +97,7 @@ impl ZopfliNode {
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliZopfliCreateCommands(
     num_bytes: usize,
     block_start: usize,
@@ -1056,6 +1057,7 @@ fn ShortestPathPositionsSimd<
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliZopfliComputeShortestPath<
     AllocU32: Allocator<u32>,
     Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
@@ -1126,6 +1128,7 @@ where
     ComputeShortestPathFromNodes(num_bytes, nodes)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliCreateZopfliBackwardReferences<
     Alloc: Allocator<u32> + Allocator<floatX> + Allocator<ZopfliNode>,
     Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
@@ -1188,6 +1191,7 @@ pub fn BrotliCreateZopfliBackwardReferences<
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn SetCost(histogram: &[u32], histogram_size: usize, literal_histogram: bool, cost: &mut [floatX]) {
     let mut sum: u64 = 0;
     for i in 0..histogram_size {
@@ -1301,6 +1305,7 @@ impl<AllocF: Allocator<floatX>> ZopfliCostModel<AllocF> {
 
 /// Detects once for the whole block; the per-position node update it drives measures
 /// match lengths tens of times per position.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ZopfliIterate<AllocF: Allocator<floatX>>(
     num_bytes: usize,
     position: usize,
@@ -1336,6 +1341,7 @@ fn ZopfliIterate<AllocF: Allocator<floatX>>(
 
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ZopfliIterateSimd<S: Simd, AllocF: Allocator<floatX>>(
     simd: S,
     num_bytes: usize,
@@ -1418,6 +1424,7 @@ fn ZopfliIterateSimd<S: Simd, AllocF: Allocator<floatX>>(
     ComputeShortestPathFromNodes(num_bytes, nodes)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliCreateHqZopfliBackwardReferences<
     Alloc: Allocator<u32> + Allocator<u64> + Allocator<floatX> + Allocator<ZopfliNode>,
     Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,

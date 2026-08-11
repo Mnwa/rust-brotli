@@ -529,6 +529,9 @@ fn has_stdlib() -> bool {
     false
 }
 
+// With `--features hotpath` this wraps `main` in a profiler guard that prints a per-stage
+// table of the encoder pipeline on exit. Inert otherwise.
+#[cfg_attr(feature = "hotpath", hotpath::main)]
 fn main() {
     let mut buffer_size = 65536;
     let mut do_compress = false;

@@ -121,6 +121,7 @@ fn MyRand(seed: &mut u32) -> u32 {
     *seed
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn InitialEntropyCodes<
     HistogramType: SliceWrapper<u32> + SliceWrapperMut<u32> + CostAccessors,
     IntegerType: Sized + Clone,
@@ -170,6 +171,7 @@ fn RandomSample<
     HistogramAddVector(sample, &data[pos..], stride);
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn RefineEntropyCodes<
     HistogramType: SliceWrapper<u32> + SliceWrapperMut<u32> + CostAccessors + core::default::Default,
     IntegerType: Sized + Clone,
@@ -436,6 +438,7 @@ fn BuildBlockHistograms<
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ClusterBlocks<
     HistogramType: SliceWrapper<u32> + SliceWrapperMut<u32> + CostAccessors + core::default::Default + Clone,
     Alloc: alloc::Allocator<u8>
@@ -729,6 +732,7 @@ fn ClusterBlocks<
     <Alloc as Allocator<u32>>::free_cell(alloc, histogram_symbols);
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn SplitByteVector<
     HistogramType: SliceWrapper<u32> + SliceWrapperMut<u32> + CostAccessors + core::default::Default + Clone,
     Alloc: alloc::Allocator<u8>
@@ -876,6 +880,7 @@ fn SplitByteVector<
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliSplitBlock<
     Alloc: alloc::Allocator<u8>
         + alloc::Allocator<u16>

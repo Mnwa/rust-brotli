@@ -154,6 +154,7 @@ fn IsMatch(p1: &[u8], p2: &[u8], length: usize) -> bool {
 }
 
 #[allow(unused_assignments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn CreateCommands(
     input_index: usize,
     block_size: usize,
@@ -516,6 +517,7 @@ fn BuildAndStoreCommandPrefixCode(
     );
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn StoreCommands<AllocHT: alloc::Allocator<HuffmanTree>>(
     mht: &mut AllocHT,
     mut literals: &[u8],
@@ -643,6 +645,7 @@ fn EmitUncompressedMetaBlock(
 
 #[allow(unused_variables)]
 #[inline(always)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn compress_fragment_two_pass_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     m: &mut AllocHT,
     base_ip: &[u8],

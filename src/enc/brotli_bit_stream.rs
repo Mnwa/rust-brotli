@@ -418,6 +418,7 @@ fn process_command_queue<'a, CmdProcessor: interface::CommandProcessor<'a>>(
     recoder_state
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn LogMetaBlock<'a, Alloc: BrotliAlloc, Cb>(
     alloc: &mut Alloc,
     commands: &[Command],
@@ -2029,6 +2030,7 @@ pub fn JumpToByteBoundary(storage_ix: &mut usize, storage: &mut [u8]) {
     storage[(*storage_ix >> 3)] = 0u8;
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn store_meta_block<Alloc: BrotliAlloc, Cb>(
     alloc: &mut Alloc,
     input: &[u8],
@@ -2343,6 +2345,7 @@ fn StoreDataWithHuffmanCodes(
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn store_meta_block_trivial<Alloc: BrotliAlloc, Cb>(
     alloc: &mut Alloc,
     input: &[u8],
@@ -2572,6 +2575,7 @@ impl RecoderState {
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn store_meta_block_fast<Cb, Alloc: BrotliAlloc>(
     m: &mut Alloc,
     input: &[u8],
