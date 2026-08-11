@@ -1,4 +1,4 @@
-use alloc::Allocator;
+use crate::alloc::Allocator;
 use core;
 use core::cmp::{max, min};
 
@@ -6,20 +6,20 @@ use super::super::alloc;
 use super::super::alloc::{SliceWrapper, SliceWrapperMut};
 use super::backward_references::{
     AdvHashSpecialization, AdvHasher, AnyHasher, BasicHasher, BrotliCreateBackwardReferences,
-    BrotliEncoderMode, BrotliEncoderParams, BrotliHasherParams, H2Sub, H3Sub, H4Sub, H54Sub, H5Sub,
-    H6Sub, HQ5Sub, HQ7Sub, HowPrepared, StoreLookaheadThenStore, Struct1, UnionHasher, H9,
-    H9_BLOCK_BITS, H9_BLOCK_SIZE, H9_BUCKET_BITS, H9_NUM_LAST_DISTANCES_TO_CHECK,
+    BrotliEncoderMode, BrotliEncoderParams, BrotliHasherParams, H2Sub, H3Sub, H4Sub, H5Sub, H6Sub,
+    H9, H9_BLOCK_BITS, H9_BLOCK_SIZE, H9_BUCKET_BITS, H9_NUM_LAST_DISTANCES_TO_CHECK, H54Sub,
+    HQ5Sub, HQ7Sub, HowPrepared, StoreLookaheadThenStore, Struct1, UnionHasher,
 };
-use super::bit_cost::{shannon_entropy, BitsEntropy};
+use super::bit_cost::{BitsEntropy, shannon_entropy};
 use super::brotli_bit_stream::{
-    store_meta_block, store_meta_block_fast, store_meta_block_trivial,
-    store_uncompressed_meta_block, BrotliWriteEmptyLastMetaBlock, BrotliWriteMetadataMetaBlock,
-    BrotliWritePaddingMetaBlock, MetaBlockSplit, RecoderState,
+    BrotliWriteEmptyLastMetaBlock, BrotliWriteMetadataMetaBlock, BrotliWritePaddingMetaBlock,
+    MetaBlockSplit, RecoderState, store_meta_block, store_meta_block_fast,
+    store_meta_block_trivial, store_uncompressed_meta_block,
 };
 use super::combined_alloc::BrotliAlloc;
-use super::command::{get_length_code, BrotliDistanceParams, Command};
+use super::command::{BrotliDistanceParams, Command, get_length_code};
 use super::compress_fragment::compress_fragment_fast;
-use super::compress_fragment_two_pass::{compress_fragment_two_pass, BrotliWriteBits};
+use super::compress_fragment_two_pass::{BrotliWriteBits, compress_fragment_two_pass};
 use super::constants::{
     BROTLI_CONTEXT, BROTLI_CONTEXT_LUT, BROTLI_MAX_NDIRECT, BROTLI_MAX_NPOSTFIX,
     BROTLI_NUM_HISTOGRAM_DISTANCE_SYMBOLS, BROTLI_WINDOW_GAP,
@@ -34,8 +34,8 @@ use super::metablock::{
     BrotliOptimizeHistograms,
 };
 pub use super::parameters::BrotliEncoderParameter;
-use super::static_dict::{kNumDistanceCacheEntries, BrotliGetDictionary};
-use super::util::{floatX, Log2FloorNonZero};
+use super::static_dict::{BrotliGetDictionary, kNumDistanceCacheEntries};
+use super::util::{Log2FloorNonZero, floatX};
 use crate::enc::combined_alloc::{alloc_default, allocate};
 use crate::enc::input_pair::InputReferenceMut;
 use crate::enc::utf8_util::is_mostly_utf8;
@@ -119,7 +119,7 @@ fn GetNextOutInternal<'a>(
     }
 }
 macro_rules! GetNextOut {
-    ($s : expr) => {
+    ($s : expr_2021) => {
         GetNextOutInternal(&$s.next_out_, $s.storage_.slice_mut(), &mut $s.tiny_buf_)
     };
 }
@@ -809,6 +809,7 @@ fn RingBufferWrite<AllocU8: alloc::Allocator<u8>>(
 }
 
 impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn copy_input_to_ring_buffer(&mut self, input_size: usize, input_buffer: &[u8]) {
         if !self.ensure_initialized() {
             return;
@@ -1433,6 +1434,7 @@ fn MakeUncompressedStream(input: &[u8], input_size: usize, output: &mut [u8]) ->
 }
 
 #[cfg_attr(not(feature = "ffi-api"), cfg(test))]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn encoder_compress<
     Alloc: BrotliAlloc,
     MetablockCallback: FnMut(
@@ -1657,7 +1659,7 @@ fn HashTableSize(max_table_size: usize, input_size: usize) -> usize {
 }
 
 macro_rules! GetHashTable {
-    ($s : expr, $quality: expr, $input_size : expr, $table_size : expr) => {
+    ($s : expr_2021, $quality: expr_2021, $input_size : expr_2021, $table_size : expr_2021) => {
         GetHashTableInternal(
             &mut $s.m8,
             &mut $s.small_table_,
@@ -1714,6 +1716,7 @@ fn MaxMetablockSize(params: &BrotliEncoderParams) -> usize {
     1 << min(ComputeRbBits(params), 24)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ChooseContextMap(
     quality: i32,
     bigram_histo: &mut [u32],
@@ -1870,6 +1873,7 @@ fn ShouldUseComplexStaticContextMap(
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn DecideOverLiteralContextModeling(
     input: &[u8],
     mut start_pos: usize,
@@ -1938,6 +1942,7 @@ fn WriteEmptyLastBlocksInternal(
         BrotliWriteEmptyLastMetaBlock(storage_ix, storage)
     }
 }
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn WriteMetaBlockInternal<Alloc: BrotliAlloc, Cb>(
     alloc: &mut Alloc,
     data: &[u8],
@@ -2211,6 +2216,7 @@ fn ChooseDistanceParams(params: &mut BrotliEncoderParams) {
 }
 
 impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn encode_data<MetablockCallback>(
         &mut self,
         is_last: bool,
@@ -2705,6 +2711,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
         );
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn compress_stream_fast(
         &mut self,
         op: BrotliEncoderOperation,

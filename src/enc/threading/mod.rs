@@ -1,16 +1,16 @@
-use alloc::{Allocator, SliceWrapper, SliceWrapperMut};
+use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core::marker::PhantomData;
 use core::ops::Range;
 use core::{any, mem};
 #[cfg(feature = "std")]
 use std;
 
+use super::BrotliAlloc;
 use super::backward_references::{AnyHasher, BrotliEncoderParams, CloneWithAlloc, UnionHasher};
 use super::encode::{
-    hasher_setup, BrotliEncoderDestroyInstance, BrotliEncoderMaxCompressedSize,
-    BrotliEncoderOperation, SanitizeParams,
+    BrotliEncoderDestroyInstance, BrotliEncoderMaxCompressedSize, BrotliEncoderOperation,
+    SanitizeParams, hasher_setup,
 };
-use super::BrotliAlloc;
 use crate::concat::{BroCatli, BroCatliResult};
 use crate::enc::combined_alloc::{alloc_default, allocate};
 use crate::enc::encode::BrotliEncoderStateStruct;
@@ -81,11 +81,11 @@ pub enum InternalSendAlloc<
     SpawningOrJoining(PhantomData<ReturnVal>),
 }
 impl<
-        ReturnVal: Send + 'static,
-        ExtraInput: Send + 'static,
-        Alloc: BrotliAlloc + Send + 'static,
-        Join: Joinable<ReturnVal, BrotliEncoderThreadError>,
-    > InternalSendAlloc<ReturnVal, ExtraInput, Alloc, Join>
+    ReturnVal: Send + 'static,
+    ExtraInput: Send + 'static,
+    Alloc: BrotliAlloc + Send + 'static,
+    Join: Joinable<ReturnVal, BrotliEncoderThreadError>,
+> InternalSendAlloc<ReturnVal, ExtraInput, Alloc, Join>
 where
     <Alloc as Allocator<u8>>::AllocatedMemory: Send,
 {
@@ -108,11 +108,11 @@ where
     <Alloc as Allocator<u8>>::AllocatedMemory: Send;
 
 impl<
-        ReturnValue: Send + 'static,
-        ExtraInput: Send + 'static,
-        Alloc: BrotliAlloc + Send + 'static,
-        Join: Joinable<ReturnValue, BrotliEncoderThreadError>,
-    > SendAlloc<ReturnValue, ExtraInput, Alloc, Join>
+    ReturnValue: Send + 'static,
+    ExtraInput: Send + 'static,
+    Alloc: BrotliAlloc + Send + 'static,
+    Join: Joinable<ReturnValue, BrotliEncoderThreadError>,
+> SendAlloc<ReturnValue, ExtraInput, Alloc, Join>
 where
     <Alloc as Allocator<u8>>::AllocatedMemory: Send,
 {
@@ -284,14 +284,14 @@ impl<ReturnValue:Send+'static,
 pub fn CompressMultiSlice<
     Alloc: BrotliAlloc + Send + 'static,
     Spawner: BatchSpawnableLite<
-        CompressionThreadResult<Alloc>,
-        UnionHasher<Alloc>,
-        Alloc,
-        (
-            <Alloc as Allocator<u8>>::AllocatedMemory,
-            BrotliEncoderParams,
-        ),
-    >,
+            CompressionThreadResult<Alloc>,
+            UnionHasher<Alloc>,
+            Alloc,
+            (
+                <Alloc as Allocator<u8>>::AllocatedMemory,
+                BrotliEncoderParams,
+            ),
+        >,
 >(
     params: &BrotliEncoderParams,
     input_slice: &[u8],
@@ -414,11 +414,11 @@ pub fn CompressMulti<
     Alloc: BrotliAlloc + Send + 'static,
     SliceW: SliceWrapper<u8> + Send + 'static + Sync,
     Spawner: BatchSpawnableLite<
-        CompressionThreadResult<Alloc>,
-        UnionHasher<Alloc>,
-        Alloc,
-        (SliceW, BrotliEncoderParams),
-    >,
+            CompressionThreadResult<Alloc>,
+            UnionHasher<Alloc>,
+            Alloc,
+            (SliceW, BrotliEncoderParams),
+        >,
 >(
     params: &BrotliEncoderParams,
     owned_input: &mut Owned<SliceW>,
@@ -652,10 +652,15 @@ where
             }
         }
     }
-    if let Ok(retrieved_owned_input) = spawner_and_input.unwrap() {
-        *owned_input = Owned::new(retrieved_owned_input.0); // return the input to its rightful owner before returning
-    } else if compression_result.is_ok() {
-        compression_result = Err(BrotliEncoderThreadError::OtherThreadPanic);
+    match spawner_and_input.unwrap() {
+        Ok(retrieved_owned_input) => {
+            *owned_input = Owned::new(retrieved_owned_input.0); // return the input to its rightful owner before returning
+        }
+        _ => {
+            if compression_result.is_ok() {
+                compression_result = Err(BrotliEncoderThreadError::OtherThreadPanic);
+            }
+        }
     }
     compression_result
 }
