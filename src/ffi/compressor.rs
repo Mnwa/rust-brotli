@@ -1,5 +1,3 @@
-#![cfg(not(feature = "safe"))]
-
 use core;
 #[cfg(feature = "std")]
 use std::io::Write;

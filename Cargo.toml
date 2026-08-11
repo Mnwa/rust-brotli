@@ -12,7 +12,8 @@ categories = ["compression", "no-std"]
 readme = "README.md"
 autobins = false
 edition = "2015"
-rust-version = "1.59.0"
+# Bounded by `fearless_simd`, which the encoder's vectorized paths use unconditionally.
+rust-version = "1.89.0"
 include = [
   "/src/**/*.rs",
   "/examples/**/*.rs",
@@ -38,6 +39,8 @@ incremental = false
 "alloc-no-stdlib" = { version = ">=2.0.4, <3" }
 "alloc-stdlib" = { version = "~0.2", optional = true }
 "brotli-decompressor" = { version = "~5.0", default-features = false }
+# `libm` is what makes the no-stdlib build possible; the `std` feature below overrides it.
+"fearless_simd" = { version = "~0.6", default-features = false, features = ["libm"] }
 
 "sha2" = { version = "~0.10", optional = true }
 
@@ -60,7 +63,6 @@ floating_point_context_mixing = []
 no-stdlib-ffi-binding = []
 pass-through-ffi-panics = []
 seccomp = ["brotli-decompressor/seccomp"]
-simd = []
-std = ["alloc-stdlib", "brotli-decompressor/std"]
+std = ["alloc-stdlib", "brotli-decompressor/std", "fearless_simd/std"]
 validation = ["sha2"]
 vector_scratch_space = []

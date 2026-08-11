@@ -1,4 +1,3 @@
-#![cfg(not(feature = "safe"))]
 mod test;
 
 use alloc::SliceWrapper;

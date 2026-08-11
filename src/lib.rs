@@ -5,7 +5,6 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![cfg_attr(feature = "benchmark", feature(test))]
-#![cfg_attr(feature = "simd", feature(portable_simd))]
 #![cfg_attr(
     feature = "no-stdlib-ffi-binding",
     cfg_attr(not(feature = "std"), feature(lang_items))
@@ -19,6 +18,8 @@ extern crate alloc_no_stdlib as alloc;
 #[cfg(feature = "std")]
 extern crate alloc_stdlib;
 extern crate brotli_decompressor;
+#[macro_use]
+extern crate fearless_simd;
 
 pub mod concat;
 pub mod enc;

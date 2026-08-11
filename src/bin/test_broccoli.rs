@@ -335,9 +335,6 @@ fn test_concat() {
     params3.lgwin = 16;
     params3.magic_number = true;
     let mut params4 = params0.clone();
-    params4.quality = 7;
-    params4.lgwin = 14;
-    let mut params4 = params0.clone();
     params4.quality = 1;
     params4.lgwin = 10;
     let mut params5 = params0.clone();

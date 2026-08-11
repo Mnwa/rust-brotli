@@ -1,5 +1,3 @@
-#[macro_use]
-pub mod vectorization;
 pub mod backward_references;
 pub mod bit_cost;
 pub mod block_split;
@@ -8,7 +6,6 @@ pub mod brotli_bit_stream;
 pub mod cluster;
 pub mod combined_alloc;
 pub mod command;
-mod compat;
 pub mod compress_fragment;
 pub mod compress_fragment_two_pass;
 pub mod constants;
@@ -39,6 +36,7 @@ mod test;
 pub mod threading;
 pub mod utf8_util;
 pub mod util;
+pub mod vectorization;
 mod weights;
 pub mod worker_pool;
 pub mod writer;
@@ -78,18 +76,9 @@ pub use self::vectorization::{v256, v256i, Mem256f};
 pub use self::worker_pool::{compress_worker_pool, new_work_pool, WorkerPool};
 use crate::enc::encode::BrotliEncoderStateStruct;
 
-#[cfg(feature = "simd")]
-pub type s16 = core::simd::i16x16;
-#[cfg(feature = "simd")]
-pub type v8 = core::simd::f32x8;
-#[cfg(feature = "simd")]
-pub type s8 = core::simd::i32x8;
-#[cfg(not(feature = "simd"))]
-pub type s16 = compat::Compat16x16;
-#[cfg(not(feature = "simd"))]
-pub type v8 = compat::CompatF8;
-#[cfg(not(feature = "simd"))]
-pub type s8 = compat::Compat32x8;
+pub type s16 = vectorization::Mem16x16;
+pub type v8 = vectorization::Mem256f;
+pub type s8 = vectorization::Mem256i;
 
 #[cfg(feature = "std")]
 pub fn compress_multi<

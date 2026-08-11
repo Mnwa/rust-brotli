@@ -1,7 +1,7 @@
 use core;
 use core::cmp::{max, min};
-#[cfg(feature = "simd")]
-use core::simd::prelude::{SimdFloat, SimdPartialOrd};
+
+use fearless_simd::{f32x8, Simd, SimdBase, SimdFloat, SimdMask};
 
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;
@@ -14,7 +14,7 @@ use super::histogram::{
     HistogramClear, HistogramCommand, HistogramDistance, HistogramLiteral,
 };
 use super::util::FastLog2;
-use super::vectorization::{sum8i, v256, v256i, Mem256f};
+use super::vectorization::{detect_level, Mem256f};
 use crate::enc::combined_alloc::allocate;
 use crate::enc::floatX;
 
@@ -45,7 +45,8 @@ static kIterMulForRefining: usize = 2usize;
 static kMinItersForRefining: usize = 100usize;
 
 #[inline(always)]
-fn update_cost_and_signal(
+fn update_cost_and_signal<S: Simd>(
+    simd: S,
     num_histograms32: u32,
     ix: usize,
     min_cost: floatX,
@@ -53,34 +54,19 @@ fn update_cost_and_signal(
     cost: &mut [Mem256f],
     switch_signal: &mut [u8],
 ) {
-    let ymm_min_cost = v256::splat(min_cost);
-    let ymm_block_switch_cost = v256::splat(block_switch_cost);
-    let ymm_and_mask = v256i::from([
-        1 << 0,
-        1 << 1,
-        1 << 2,
-        1 << 3,
-        1 << 4,
-        1 << 5,
-        1 << 6,
-        1 << 7,
-    ]);
+    let ymm_min_cost = f32x8::splat(simd, min_cost);
+    let ymm_block_switch_cost = f32x8::splat(simd, block_switch_cost);
 
     for (index, cost_it) in cost[..((num_histograms32 as usize + 7) >> 3)]
         .iter_mut()
         .enumerate()
     {
-        let mut ymm_cost = *cost_it;
-        let costk_minus_min_cost = ymm_cost - ymm_min_cost;
-        let ymm_cmpge: v256i = costk_minus_min_cost
+        let costk_minus_min_cost = cost_it.to_simd(simd) - ymm_min_cost;
+        // One bit per lane that is at least a block switch away from the cheapest histogram.
+        switch_signal[ix + index] |= costk_minus_min_cost
             .simd_ge(ymm_block_switch_cost)
-            .to_simd();
-        let ymm_bits = ymm_cmpge & ymm_and_mask;
-        let result = sum8i(ymm_bits);
-        //super::vectorization::sum8(ymm_bits) as u8;
-        switch_signal[ix + index] |= result as u8;
-        ymm_cost = costk_minus_min_cost.simd_min(ymm_block_switch_cost);
-        *cost_it = Mem256f::from(ymm_cost);
+            .to_bitmask() as u8;
+        *cost_it = Mem256f::from_simd(costk_minus_min_cost.min(ymm_block_switch_cost));
         //println_stderr!("{:} ss {:} c {:?}", (index << 3) + 7, switch_signal[ix + index],*cost_it);
     }
 }
@@ -222,10 +208,46 @@ fn BitCost(count: usize) -> floatX {
     }
 }
 
+/// Entry point into the vectorized cost loop: picks the best instruction set available
+/// and runs [`FindBlocksSimd`] with it.
 fn FindBlocks<
     HistogramType: SliceWrapper<u32> + SliceWrapperMut<u32> + CostAccessors,
     IntegerType: Sized + Clone,
 >(
+    data: &[IntegerType],
+    length: usize,
+    block_switch_bitcost: floatX,
+    num_histograms: usize,
+    histograms: &[HistogramType],
+    insert_cost: &mut [floatX],
+    cost: &mut [Mem256f],
+    switch_signal: &mut [u8],
+    block_id: &mut [u8],
+) -> usize
+where
+    u64: core::convert::From<IntegerType>,
+{
+    dispatch!(detect_level(), simd => FindBlocksSimd(
+        simd,
+        data,
+        length,
+        block_switch_bitcost,
+        num_histograms,
+        histograms,
+        insert_cost,
+        cost,
+        switch_signal,
+        block_id,
+    ))
+}
+
+#[inline(always)]
+fn FindBlocksSimd<
+    S: Simd,
+    HistogramType: SliceWrapper<u32> + SliceWrapperMut<u32> + CostAccessors,
+    IntegerType: Sized + Clone,
+>(
+    simd: S,
     data: &[IntegerType],
     length: usize,
     block_switch_bitcost: floatX,
@@ -322,6 +344,7 @@ where
             block_switch_cost *= (0.77 + 0.07 * (byte_ix as floatX) / 2000.0);
         }
         update_cost_and_signal(
+            simd,
             num_histograms as u32,
             ix,
             min_cost,
