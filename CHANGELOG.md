@@ -1,5 +1,44 @@
 # Changelog
 
+## 9.0.1
+
+Maintenance release: a dependency bump and a slice-copy cleanup, neither of which changes what the
+encoder emits. **Compressed output is unchanged** — every stream is byte-identical to 9.0.0 at
+every quality level, and the MSRV stays at 1.89.0.
+
+### `fearless_simd` 0.6 → 0.7
+
+- Raised the requirement to `~0.7`. The upgrade is source-only: 0.7 moves the arithmetic and
+  bitwise operator bounds that used to sit on `SimdInt` and `SimdFloat` up onto `SimdBase`, so the
+  two traits no longer need importing where the code only does arithmetic on lanes. That drops one
+  or two names from the `fearless_simd` import in `bit_cost.rs`, `block_splitter.rs`,
+  `prior_eval.rs`, `static_dict.rs` and `vectorization.rs`, and touches nothing else.
+- No vectorized path was rewritten. 0.7's new surface was reviewed for anything this crate could
+  adopt and nothing applies — `rotate_elements_left`, the most promising addition, is an alias for
+  the `slide` this crate already uses.
+
+### `clone_from_slice` → `copy_from_slice`
+
+- Replaced 93 of the 95 `clone_from_slice` calls under `src/` with `copy_from_slice`. This is an
+  intent change rather than an optimization: core specializes `clone_from_slice` through
+  `CloneFromSpec` at monomorphization, so for `Copy` elements both already lowered to the same
+  `memcpy`. What changes is that the call site now says so. Release `__text` shrank by 408 bytes
+  (754,496 → 754,088) and encode wall clock is unchanged — at q5, q9, q10 and q11 on a 4.9 MB
+  varied corpus, over 20 runs each, every delta lands inside one standard deviation.
+- Two call sites keep `clone_from_slice` because their element type is only `Clone`:
+  `enc::compress_fragment_two_pass::memcpy`, a public generic whose bound cannot be tightened
+  without a breaking change, and the histogram-array growth in `enc::block_splitter`, where
+  `HistogramLiteral` / `HistogramCommand` / `HistogramDistance` are deliberately not `Copy` — they
+  carry 256- to 704-entry arrays behind hand-written `Clone` impls.
+
+### Verification
+
+Encoder output was diffed against 9.0.0 over 504 (corpus, quality, window) combinations — 14
+`testdata` inputs × qualities 0–11 × `-w16`, `-w22` and `-w24` — with zero mismatches. The
+multi-threaded (`-j2`, `-j4`) and `catbrotli` concatenation paths produce identical bytes too, and
+round-trips decode across builds in both directions. The 138-test suite passes, and the default,
+`no-default-features`, `hotpath`, wide-feature and `c/` FFI builds are all clean.
+
 ## 9.0.0 — first release as `simd-brotli`
 
 Forked from [`brotli`](https://crates.io/crates/brotli) 8.0.4

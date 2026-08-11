@@ -1,6 +1,6 @@
 [package]
 name = "simd-brotli"
-version = "9.0.0"
+version = "9.0.1"
 authors = [
   "Mikhail Panfilov <mihan@panfilov.biz>",
   "Daniel Reiter Horn <danielrh@dropbox.com>",
