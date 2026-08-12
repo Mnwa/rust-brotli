@@ -705,9 +705,13 @@ pub trait ScopedSpawner<'env> {
 /// be generic over the spawner: a scope implementation only learns its own
 /// spawner type once it is inside e.g. `std::thread::scope`, which quantifies
 /// over a lifetime that cannot be named from the outside.
+///
+/// `Self` and [`Output`](ScopeBody::Output) are `Send` so that implementations
+/// of [`ThreadScope`] are free to use a scope API that runs the body somewhere
+/// other than the calling thread, such as `rayon::scope`.
 #[cfg(feature = "std")]
-pub trait ScopeBody<'env> {
-    type Output;
+pub trait ScopeBody<'env>: Send {
+    type Output: Send;
     /// Called exactly once, with a spawner for the freshly opened scope.
     fn run<Spawner: ScopedSpawner<'env>>(self, spawner: &Spawner) -> Self::Output;
 }
@@ -734,10 +738,16 @@ pub trait ScopeBody<'env> {
 ///
 /// impl ThreadScope for RayonThreadScope {
 ///     fn scope<'env, Body: ScopeBody<'env>>(&self, body: Body) -> Body::Output {
-///         rayon::scope(|scope| body.run(&RayonSpawner(scope)))
+///         // `in_place_scope`, not `scope`: the body compresses the last chunk
+///         // itself, so this keeps that work on the calling thread instead of
+///         // handing it to a pool worker while this thread blocks on it.
+///         rayon::in_place_scope(|scope| body.run(&RayonSpawner(scope)))
 ///     }
 /// }
 /// ```
+///
+/// `rayon::scope` works as well — that is what the `Send` bounds on
+/// [`ScopeBody`] are for — but it costs a thread hop for the body.
 #[cfg(feature = "std")]
 pub trait ThreadScope {
     /// Opens a scope, runs `body` in it, and returns `body`'s output only once
