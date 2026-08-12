@@ -1,5 +1,94 @@
 # Changelog
 
+## 9.1.0
+
+Adds a scoped multi-threaded entry point, `enc::threading::CompressMultiScoped`, which compresses
+a **borrowed** `&[u8]` inside a thread scope the caller supplies — `std::thread::scope`,
+`rayon::in_place_scope`, or anything else that joins its tasks before returning. **Compressed
+output is unchanged**: for the same input, chunk count and parameters it emits the same bytes as
+`CompressMulti`, and it shares that function's chunking, hasher construction and concatenation. The
+release is purely additive — no existing item changed shape — and the MSRV stays at 1.89.0.
+
+### `CompressMultiScoped`
+
+```rust
+pub fn CompressMultiScoped<Alloc: BrotliAlloc + Send + 'static, Scope: ThreadScope>(
+    params: &BrotliEncoderParams,
+    input: &[u8],
+    output: &mut [u8],
+    alloc_per_thread: &mut [Option<Alloc>],
+    thread_scope: &Scope,
+) -> Result<usize, BrotliEncoderThreadError>
+```
+
+Because the scope guarantees the workers finish before it returns, most of what `CompressMulti`
+carries to make the input outlive its threads is unnecessary:
+
+- **The input is borrowed, not owned.** `CompressMulti` moves the buffer into an `Owned<SliceW>`,
+  publishes it as `Arc<RwLock<..>>` and has every worker take a read lock to reach it;
+  `CompressMultiSlice` additionally allocates and memcpys a private copy of the whole input. The
+  scoped path hands each worker a plain `&[u8]`. The caller's buffer needs no `SliceWrapper`
+  wrapper and no `Send + Sync + 'static` bound, and there is no `Arc`, no lock and no copy.
+- **Results land in slots instead of being joined.** Each worker owns one disjoint
+  `&mut Option<CompressionThreadResult<Alloc>>` and writes into it; nothing blocks until the scope
+  closes, after which the chunks are concatenated in order with no further synchronization.
+- **Allocators are `&mut [Option<Alloc>]`.** One per chunk, taken on spawn and put back when the
+  results are drained, so `SendAlloc`, `Joinable` and the `BatchSpawnableLite` spawner all drop out
+  of the signature. A slot still `None` on return means that worker never completed, which is
+  reported as `OtherThreadPanic`.
+
+Scheduling is deliberately identical to `CompressMulti`: chunk 0 is spawned before the shared
+hasher is built so it overlaps that work, chunks 1..n-2 are spawned as their hasher clones become
+ready, and the last chunk is compressed on the calling thread.
+
+### Bringing your own scope: `ThreadScope`, `ScopeBody`, `ScopedSpawner`
+
+Three traits (`std` only) bridge to a scoped-thread API without this crate depending on one.
+`StdThreadScope` implements them over `std::thread::scope`; the `ThreadScope` docs carry
+copy-pasteable rayon implementations for the calling crate, since orphan rules keep them from
+living here.
+
+- Everything is generic — no `Box<dyn FnOnce>` per task and no `dyn` spawner, so tasks are
+  monomorphized and passed straight to the underlying `spawn`.
+- That is why `ScopeBody` exists rather than a closure: `ScopedSpawner::spawn` is generic, so the
+  spawner is not object-safe, and the body has to be generic over it. A scope implementation only
+  learns its spawner type *inside* e.g. `std::thread::scope`, which quantifies over a lifetime no
+  outer signature can name — a GAT cannot express it, but a rank-2 `fn run<Spawner>(self, ..)` can.
+- **Both rayon entry points are supported.** `rayon::scope` requires its body to be `Send` and its
+  return value to be `Send`, and an implementation of `ThreadScope::scope` cannot add `where`
+  clauses of its own — so those bounds live on the trait, as `ScopeBody: Send` with
+  `type Output: Send`. `rayon::in_place_scope` needs neither, and is the better default when the
+  calling thread is yours to use: the body compresses the last chunk itself, so running it in place
+  keeps that work on the caller instead of handing it to a pool worker while the caller blocks.
+  `rayon::scope` is the right choice when the calling thread should do no encode work at all.
+  Output is identical either way.
+- Sound by construction rather than by contract: a task is bounded by the `'env` it borrows, so no
+  safe implementation can hand it to a non-scoped thread. Leaking one is safe and merely leaves the
+  slot empty, which surfaces as an error.
+
+### Verification and measurements
+
+Three tests were added. The scoped path's output is asserted byte-identical to `CompressMulti`
+across 1–4 chunks × `favor_cpu_efficiency` on/off × two scope implementations (`StdThreadScope` and
+an inline one that runs tasks on the calling thread, which also checks the traits against a
+non-`std::thread` backend); a round-trip decodes back to the input; and the insufficient-output-space
+path is checked to still return every allocator. The suite is now 141 tests.
+
+Against rayon 1.12 out of tree, the two implementations from the `ThreadScope` docs were compiled
+verbatim and both — `in_place_scope` and `scope` — match `StdThreadScope` byte for byte at 1–4
+chunks.
+
+Wall clock on a 3.4 MB varied corpus (English text, a mixed unicode/binary blob, a shared library
+and two synthetic files), 4 chunks, `favor_cpu_efficiency`, Apple M5 Pro, rustc 1.97.1, release
+profile with LTO: **no measurable difference** from either `CompressMulti` or `CompressMultiSlice`
+at q5, q9 or q11. Comparing medians of 7 alternating runs, the deltas against `CompressMulti` are
+−0.3%, +0.8% and −0.2%; against `CompressMultiSlice` they swing between −4.6% and +1.8% across
+four repeats of the same measurement, averaging about 1% in favour of the scoped path — roughly
+what skipping one 3.4 MB allocation and copy is worth. This is the expected result: the `Arc`, the
+lock and the join are per chunk, not per byte. The reason to reach for this entry point is what
+the caller no longer has to own or copy and the ability to run on a pool it already has, not
+encode time.
+
 ## 9.0.1
 
 Maintenance release: a dependency bump and a slice-copy cleanup, neither of which changes what the
