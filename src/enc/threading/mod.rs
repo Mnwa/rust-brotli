@@ -721,12 +721,13 @@ pub trait ScopeBody<'env>: Send {
 /// dependency of this crate.
 ///
 /// [`StdThreadScope`] implements this over `std::thread::scope`. A rayon-backed
-/// implementation is a handful of lines in the calling crate:
+/// implementation is a handful of lines in the calling crate, and either of
+/// rayon's two scope entry points will do — [`ScopeBody`]'s `Send` bounds are
+/// there so that `rayon::scope`, which requires both its body and its return
+/// value to be `Send`, is usable as well:
 ///
 /// ```ignore
 /// use simd_brotli::enc::threading::{ScopeBody, ScopedSpawner, ThreadScope};
-///
-/// pub struct RayonThreadScope;
 ///
 /// struct RayonSpawner<'a, 'scope>(&'a rayon::Scope<'scope>);
 ///
@@ -736,18 +737,31 @@ pub trait ScopeBody<'env>: Send {
 ///     }
 /// }
 ///
+/// /// Runs the body on the calling thread; chunks go to the pool.
+/// pub struct RayonThreadScope;
+///
 /// impl ThreadScope for RayonThreadScope {
 ///     fn scope<'env, Body: ScopeBody<'env>>(&self, body: Body) -> Body::Output {
-///         // `in_place_scope`, not `scope`: the body compresses the last chunk
-///         // itself, so this keeps that work on the calling thread instead of
-///         // handing it to a pool worker while this thread blocks on it.
 ///         rayon::in_place_scope(|scope| body.run(&RayonSpawner(scope)))
+///     }
+/// }
+///
+/// /// Runs the body on the pool as well.
+/// pub struct RayonPoolScope;
+///
+/// impl ThreadScope for RayonPoolScope {
+///     fn scope<'env, Body: ScopeBody<'env>>(&self, body: Body) -> Body::Output {
+///         rayon::scope(|scope| body.run(&RayonSpawner(scope)))
 ///     }
 /// }
 /// ```
 ///
-/// `rayon::scope` works as well — that is what the `Send` bounds on
-/// [`ScopeBody`] are for — but it costs a thread hop for the body.
+/// Both produce identical output. Prefer `in_place_scope` when the calling
+/// thread is yours to use: the body compresses the last chunk itself, so
+/// running it in place keeps that work on this thread rather than handing it to
+/// a pool worker while this thread blocks on it. Reach for `scope` when the
+/// caller should not be doing encode work at all — inside an existing rayon
+/// task, say, or when the calling thread has to stay responsive.
 #[cfg(feature = "std")]
 pub trait ThreadScope {
     /// Opens a scope, runs `body` in it, and returns `body`'s output only once
