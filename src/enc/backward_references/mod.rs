@@ -2475,55 +2475,51 @@ fn CreateBackwardReferences<AH: AnyHasher>(
         ) {
             let mut delayed_backward_references_in_row: i32 = 0i32;
             max_length = max_length.wrapping_sub(1);
-            'break6: loop {
-                'continue7: loop {
-                    let cost_diff_lazy: u64 = 175;
+            loop {
+                let cost_diff_lazy: u64 = 175;
 
-                    let mut sr2 = HasherSearchResult {
-                        len: 0,
-                        len_x_code: 0,
-                        distance: 0,
-                        score: 0,
-                    };
-                    sr2.len = if params.quality < 5 {
-                        min(sr.len.wrapping_sub(1), max_length)
-                    } else {
-                        0usize
-                    };
-                    sr2.len_x_code = 0usize;
-                    sr2.distance = 0usize;
-                    sr2.score = kMinScore;
-                    max_distance = min(position.wrapping_add(1), max_backward_limit);
-                    let is_match_found: bool = hasher.FindLongestMatch(
-                        dictionary,
-                        dictionary_hash,
-                        ringbuffer,
-                        ringbuffer_mask,
-                        ringbuffer_break,
-                        dist_cache,
-                        position.wrapping_add(1),
-                        max_length,
-                        max_distance,
-                        gap,
-                        params.dist.max_distance,
-                        &mut sr2,
-                    );
-                    if is_match_found && (sr2.score >= sr.score.wrapping_add(cost_diff_lazy)) {
-                        position = position.wrapping_add(1);
-                        insert_length = insert_length.wrapping_add(1);
-                        sr = sr2;
-                        if {
-                            delayed_backward_references_in_row += 1;
-                            delayed_backward_references_in_row
-                        } < 4i32
-                            && (position.wrapping_add(hasher.HashTypeLength()) < pos_end)
-                        {
-                            break 'continue7;
-                        }
+                let mut sr2 = HasherSearchResult {
+                    len: 0,
+                    len_x_code: 0,
+                    distance: 0,
+                    score: 0,
+                };
+                sr2.len = if params.quality < 5 {
+                    min(sr.len.wrapping_sub(1), max_length)
+                } else {
+                    0usize
+                };
+                sr2.len_x_code = 0usize;
+                sr2.distance = 0usize;
+                sr2.score = kMinScore;
+                max_distance = min(position.wrapping_add(1), max_backward_limit);
+                let is_match_found: bool = hasher.FindLongestMatch(
+                    dictionary,
+                    dictionary_hash,
+                    ringbuffer,
+                    ringbuffer_mask,
+                    ringbuffer_break,
+                    dist_cache,
+                    position.wrapping_add(1),
+                    max_length,
+                    max_distance,
+                    gap,
+                    params.dist.max_distance,
+                    &mut sr2,
+                );
+                if is_match_found && (sr2.score >= sr.score.wrapping_add(cost_diff_lazy)) {
+                    position = position.wrapping_add(1);
+                    insert_length = insert_length.wrapping_add(1);
+                    sr = sr2;
+                    delayed_backward_references_in_row += 1;
+                    if delayed_backward_references_in_row < 4
+                        && position.wrapping_add(hasher.HashTypeLength()) < pos_end
+                    {
+                        max_length = max_length.wrapping_sub(1);
+                        continue;
                     }
-                    break 'break6;
                 }
-                max_length = max_length.wrapping_sub(1);
+                break;
             }
             apply_random_heuristics = position
                 .wrapping_add((2usize).wrapping_mul(sr.len))

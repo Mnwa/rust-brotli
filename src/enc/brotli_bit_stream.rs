@@ -775,14 +775,14 @@ fn BrotliStoreHuffmanTreeOfHuffmanTreeToBitMask(
     let mut skip_some: u64 = 0u64;
     let mut codes_to_store: u64 = 18;
     if num_codes > 1i32 {
-        'break5: while codes_to_store > 0 {
+        while codes_to_store > 0 {
             {
                 if code_length_bitdepth
                     [(kStorageOrder[codes_to_store.wrapping_sub(1) as usize] as usize)]
                     as i32
                     != 0i32
                 {
-                    break 'break5;
+                    break;
                 }
             }
             codes_to_store = codes_to_store.wrapping_sub(1);
@@ -864,7 +864,7 @@ pub fn BrotliStoreHuffmanTree(
         *_lhs = (*_lhs).wrapping_add(_rhs as u32);
     }
     i = 0usize;
-    'break3: while i < 18usize {
+    while i < 18usize {
         {
             if huffman_tree_histogram[i] != 0 {
                 if num_codes == 0i32 {
@@ -873,7 +873,7 @@ pub fn BrotliStoreHuffmanTree(
                 } else if num_codes == 1i32 {
                     num_codes = 2i32;
                     {
-                        break 'break3;
+                        break;
                     }
                 }
             }
@@ -965,7 +965,7 @@ pub fn BrotliBuildAndStoreHuffmanTreeFast<AllocHT: alloc::Allocator<HuffmanTree>
         let mut tree = alloc_or_default::<HuffmanTree, _>(m, max_tree_size as usize);
         let mut count_limit: u32;
         count_limit = 1u32;
-        'break11: loop {
+        loop {
             {
                 let mut node_index: u32 = 0u32;
                 let mut l: u64;
@@ -1030,7 +1030,7 @@ pub fn BrotliBuildAndStoreHuffmanTreeFast<AllocHT: alloc::Allocator<HuffmanTree>
                         k -= 1;
                     }
                     if BrotliSetDepth(2i32 * n - 1i32, tree.slice_mut(), depth, 14i32) {
-                        break 'break11;
+                        break;
                     }
                 }
             }
@@ -1256,16 +1256,10 @@ pub struct BlockEncoder<'a, Alloc: alloc::Allocator<u8> + alloc::Allocator<u16>>
 
 fn Log2FloorNonZero(mut n: u64) -> u32 {
     let mut result: u32 = 0u32;
-    'loop1: loop {
-        if {
-            n >>= 1i32;
-            n
-        } != 0
+    while n > 1 {
+        n >>= 1;
         {
             result = result.wrapping_add(1);
-            continue 'loop1;
-        } else {
-            break 'loop1;
         }
     }
     result
@@ -1455,13 +1449,13 @@ fn BuildAndStoreHuffmanTree(
     let mut i: usize;
     let mut max_bits: usize = 0usize;
     i = 0usize;
-    'break31: while i < histogram_length {
+    while i < histogram_length {
         {
             if histogram[i] != 0 {
                 if count < 4usize {
                     s4[count] = i;
                 } else if count > 4usize {
-                    break 'break31;
+                    break;
                 }
                 count = count.wrapping_add(1);
             }

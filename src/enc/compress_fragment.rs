@@ -705,7 +705,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
         storage,
     );
     let mut code_block_selection = CodeBlockState::EMIT_COMMANDS;
-    'continue_to_next_block: loop {
+    loop {
         let mut ip_index: usize;
         if code_block_selection == CodeBlockState::EMIT_COMMANDS {
             cmd_histo[..128].copy_from_slice(&kCmdHistoSeed[..]);
@@ -799,7 +799,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                         input_index = base;
                         next_emit = input_index;
                         code_block_selection = CodeBlockState::NEXT_BLOCK;
-                        continue 'continue_to_next_block;
+                        break;
                     } else {
                         EmitLongInsertLen(
                             insert,
@@ -852,7 +852,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     next_emit = ip_index;
                     if ip_index >= ip_limit {
                         code_block_selection = CodeBlockState::EMIT_REMAINDER;
-                        continue 'continue_to_next_block;
+                        break;
                     }
 
                     assert!(ip_index >= 3);
@@ -901,7 +901,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                         next_emit = ip_index;
                         if ip_index >= ip_limit {
                             code_block_selection = CodeBlockState::EMIT_REMAINDER;
-                            continue 'continue_to_next_block;
+                            break;
                         }
 
                         assert!(ip_index >= 3);
@@ -933,8 +933,9 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     }
                 }
             }
-            code_block_selection = CodeBlockState::EMIT_REMAINDER;
-            continue 'continue_to_next_block;
+            if code_block_selection == CodeBlockState::EMIT_COMMANDS {
+                code_block_selection = CodeBlockState::EMIT_REMAINDER;
+            }
         } else if code_block_selection == CodeBlockState::EMIT_REMAINDER {
             input_index = input_index.wrapping_add(block_size);
             input_size = input_size.wrapping_sub(block_size);
@@ -951,7 +952,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     storage,
                 );
                 code_block_selection = CodeBlockState::EMIT_COMMANDS;
-                continue 'continue_to_next_block;
+                continue;
             }
             if next_emit < ip_end {
                 let insert: usize = ip_end.wrapping_sub(next_emit);
@@ -1005,35 +1006,33 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
             }
             next_emit = ip_end;
             code_block_selection = CodeBlockState::NEXT_BLOCK;
-            continue 'continue_to_next_block;
         } else if code_block_selection == CodeBlockState::NEXT_BLOCK {
-            if input_size > 0 {
-                metablock_start = input_index;
-                block_size = min(input_size, kFirstBlockSize);
-                total_block_size = block_size;
-                mlen_storage_ix = storage_ix.wrapping_add(3);
-                store_meta_block_header(block_size, false, storage_ix, storage);
-                BrotliWriteBits(13usize, 0, storage_ix, storage);
-                literal_ratio = BuildAndStoreLiteralPrefixCode(
-                    m,
-                    &input_ptr[input_index..],
-                    block_size,
-                    &mut lit_depth[..],
-                    &mut lit_bits[..],
-                    storage_ix,
-                    storage,
-                );
-                BuildAndStoreCommandPrefixCode(
-                    &mut cmd_histo[..],
-                    cmd_depth,
-                    cmd_bits,
-                    storage_ix,
-                    storage,
-                );
-                code_block_selection = CodeBlockState::EMIT_COMMANDS;
-                continue 'continue_to_next_block;
+            if input_size == 0 {
+                break;
             }
-            break;
+            metablock_start = input_index;
+            block_size = min(input_size, kFirstBlockSize);
+            total_block_size = block_size;
+            mlen_storage_ix = storage_ix.wrapping_add(3);
+            store_meta_block_header(block_size, false, storage_ix, storage);
+            BrotliWriteBits(13usize, 0, storage_ix, storage);
+            literal_ratio = BuildAndStoreLiteralPrefixCode(
+                m,
+                &input_ptr[input_index..],
+                block_size,
+                &mut lit_depth[..],
+                &mut lit_bits[..],
+                storage_ix,
+                storage,
+            );
+            BuildAndStoreCommandPrefixCode(
+                &mut cmd_histo[..],
+                cmd_depth,
+                cmd_bits,
+                storage_ix,
+                storage,
+            );
+            code_block_selection = CodeBlockState::EMIT_COMMANDS;
         }
     }
     if !is_last {

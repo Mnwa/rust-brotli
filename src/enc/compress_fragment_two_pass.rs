@@ -196,36 +196,28 @@ fn CreateCommands(
             let mut next_ip: usize = ip_index;
             let mut candidate: usize = 0;
             loop {
-                {
-                    'break3: loop {
-                        {
-                            let hash: u32 = next_hash;
-                            let bytes_between_hash_lookups: u32 = skip >> 5;
-                            skip = skip.wrapping_add(1);
-                            ip_index = next_ip;
-                            next_ip = ip_index.wrapping_add(bytes_between_hash_lookups as usize);
-                            if next_ip > ip_limit {
-                                goto_emit_remainder = true;
-                                {
-                                    break 'break3;
-                                }
-                            }
-                            next_hash = Hash(&base_ip[next_ip..], shift, min_match);
-                            candidate = ip_index.wrapping_sub(last_distance as usize);
-                            if IsMatch(&base_ip[ip_index..], &base_ip[candidate..], min_match)
-                                && candidate < ip_index
-                            {
-                                table[(hash as usize)] = ip_index.wrapping_sub(0) as i32;
-                                {
-                                    break 'break3;
-                                }
-                            }
-                            candidate = table[(hash as usize)] as usize;
-                            table[(hash as usize)] = ip_index.wrapping_sub(0) as i32;
-                        }
-                        if IsMatch(&base_ip[ip_index..], &base_ip[candidate..], min_match) {
-                            break;
-                        }
+                loop {
+                    let hash: u32 = next_hash;
+                    let bytes_between_hash_lookups: u32 = skip >> 5;
+                    skip = skip.wrapping_add(1);
+                    ip_index = next_ip;
+                    next_ip = ip_index.wrapping_add(bytes_between_hash_lookups as usize);
+                    if next_ip > ip_limit {
+                        goto_emit_remainder = true;
+                        break;
+                    }
+                    next_hash = Hash(&base_ip[next_ip..], shift, min_match);
+                    candidate = ip_index.wrapping_sub(last_distance as usize);
+                    if IsMatch(&base_ip[ip_index..], &base_ip[candidate..], min_match)
+                        && candidate < ip_index
+                    {
+                        table[(hash as usize)] = ip_index.wrapping_sub(0) as i32;
+                        break;
+                    }
+                    candidate = table[(hash as usize)] as usize;
+                    table[(hash as usize)] = ip_index.wrapping_sub(0) as i32;
+                    if IsMatch(&base_ip[ip_index..], &base_ip[candidate..], min_match) {
+                        break;
                     }
                 }
                 if !(ip_index.wrapping_sub(candidate)
