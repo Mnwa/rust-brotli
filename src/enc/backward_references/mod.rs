@@ -1,6 +1,7 @@
 mod benchmark;
 pub mod hash_to_binary_tree;
 pub mod hq;
+mod tagged;
 mod test;
 
 use core::cmp::{max, min};
@@ -15,6 +16,9 @@ use super::static_dict::{
 };
 use super::util::{Log2FloorNonZero, floatX};
 use crate::enc::combined_alloc::allocate;
+use crate::enc::vectorization::detect_level;
+
+pub use tagged::{H58Sub, H68Sub, TaggedHasher, TaggedHasherSimd};
 
 pub static kInvalidMatch: u32 = 0x0fff_ffff;
 static kCutoffTransformsCount: u32 = 10;
@@ -1681,6 +1685,7 @@ impl<
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn FindLongestMatch(
         &mut self,
         dictionary: Option<&BrotliDictionary>,
@@ -2093,7 +2098,8 @@ impl<
     }
 }
 
-pub enum UnionHasher<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> {
+#[non_exhaustive]
+pub enum UnionHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> {
     Uninit,
     H2(BasicHasher<H2Sub<Alloc>>),
     H3(BasicHasher<H3Sub<Alloc>>),
@@ -2103,11 +2109,13 @@ pub enum UnionHasher<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> {
     H5q7(AdvHasher<HQ7Sub, Alloc>),
     H5q5(AdvHasher<HQ5Sub, Alloc>),
     H6(AdvHasher<H6Sub, Alloc>),
+    H58(TaggedHasher<H58Sub, Alloc>),
+    H68(TaggedHasher<H68Sub, Alloc>),
     H9(H9<Alloc>),
     H10(H10<Alloc, H10Buckets<Alloc>, H10DefaultParams>),
 }
-impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> PartialEq<UnionHasher<Alloc>>
-    for UnionHasher<Alloc>
+impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>
+    PartialEq<UnionHasher<Alloc>> for UnionHasher<Alloc>
 {
     fn eq(&self, other: &UnionHasher<Alloc>) -> bool {
         match *self {
@@ -2143,6 +2151,14 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> PartialEq<UnionHasher
                 UnionHasher::H6(ref otherh) => *hasher == *otherh,
                 _ => false,
             },
+            UnionHasher::H58(ref hasher) => match *other {
+                UnionHasher::H58(ref otherh) => *hasher == *otherh,
+                _ => false,
+            },
+            UnionHasher::H68(ref hasher) => match *other {
+                UnionHasher::H68(ref otherh) => *hasher == *otherh,
+                _ => false,
+            },
             UnionHasher::H9(ref hasher) => match *other {
                 UnionHasher::H9(ref otherh) => *hasher == *otherh,
                 _ => false,
@@ -2158,8 +2174,8 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> PartialEq<UnionHasher
         }
     }
 }
-impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
-    for UnionHasher<Alloc>
+impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>
+    CloneWithAlloc<Alloc> for UnionHasher<Alloc>
 {
     fn clone_with_alloc(&self, m: &mut Alloc) -> Self {
         match *self {
@@ -2170,6 +2186,8 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> CloneWithAlloc<Alloc>
             UnionHasher::H5q7(ref hasher) => UnionHasher::H5q7(hasher.clone_with_alloc(m)),
             UnionHasher::H5q5(ref hasher) => UnionHasher::H5q5(hasher.clone_with_alloc(m)),
             UnionHasher::H6(ref hasher) => UnionHasher::H6(hasher.clone_with_alloc(m)),
+            UnionHasher::H58(ref hasher) => UnionHasher::H58(hasher.clone_with_alloc(m)),
+            UnionHasher::H68(ref hasher) => UnionHasher::H68(hasher.clone_with_alloc(m)),
             UnionHasher::H54(ref hasher) => UnionHasher::H54(hasher.clone_with_alloc(m)),
             UnionHasher::H9(ref hasher) => UnionHasher::H9(hasher.clone_with_alloc(m)),
             UnionHasher::H10(ref hasher) => UnionHasher::H10(hasher.clone_with_alloc(m)),
@@ -2187,6 +2205,8 @@ macro_rules! match_all_hashers_mut {
      &mut UnionHasher::H5q7(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H5q5(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H6(ref mut hasher) => hasher.$func_call($($args),*),
+     &mut UnionHasher::H58(ref mut hasher) => hasher.$func_call($($args),*),
+     &mut UnionHasher::H68(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H54(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H9(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H10(ref mut hasher) => hasher.$func_call($($args),*),
@@ -2204,6 +2224,8 @@ macro_rules! match_all_hashers {
      &UnionHasher::H5q7(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H5q5(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H6(ref hasher) => hasher.$func_call($($args),*),
+     &UnionHasher::H58(ref hasher) => hasher.$func_call($($args),*),
+     &UnionHasher::H68(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H54(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H9(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H10(ref hasher) => hasher.$func_call($($args),*),
@@ -2211,7 +2233,9 @@ macro_rules! match_all_hashers {
         }
     };
 }
-impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for UnionHasher<Alloc> {
+impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher
+    for UnionHasher<Alloc>
+{
     fn Opts(&self) -> H9Opts {
         match_all_hashers!(self, Opts,)
     }
@@ -2295,7 +2319,9 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for UnionHa
     }
 }
 
-impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> UnionHasher<Alloc> {
+impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>
+    UnionHasher<Alloc>
+{
     pub fn free(&mut self, alloc: &mut Alloc) {
         match self {
             &mut UnionHasher::H2(ref mut hasher) => {
@@ -2338,6 +2364,16 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> UnionHasher<Alloc> {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
+            &mut UnionHasher::H58(ref mut hasher) => {
+                <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
+                <Alloc as Allocator<u8>>::free_cell(alloc, core::mem::take(&mut hasher.tags));
+                <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
+            }
+            &mut UnionHasher::H68(ref mut hasher) => {
+                <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
+                <Alloc as Allocator<u8>>::free_cell(alloc, core::mem::take(&mut hasher.tags));
+                <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
+            }
             &mut UnionHasher::H9(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num_));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets_));
@@ -2351,7 +2387,9 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> UnionHasher<Alloc> {
     }
 }
 
-impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> Default for UnionHasher<Alloc> {
+impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> Default
+    for UnionHasher<Alloc>
+{
     fn default() -> Self {
         UnionHasher::Uninit
     }
@@ -2437,55 +2475,51 @@ fn CreateBackwardReferences<AH: AnyHasher>(
         ) {
             let mut delayed_backward_references_in_row: i32 = 0i32;
             max_length = max_length.wrapping_sub(1);
-            'break6: loop {
-                'continue7: loop {
-                    let cost_diff_lazy: u64 = 175;
+            loop {
+                let cost_diff_lazy: u64 = 175;
 
-                    let mut sr2 = HasherSearchResult {
-                        len: 0,
-                        len_x_code: 0,
-                        distance: 0,
-                        score: 0,
-                    };
-                    sr2.len = if params.quality < 5 {
-                        min(sr.len.wrapping_sub(1), max_length)
-                    } else {
-                        0usize
-                    };
-                    sr2.len_x_code = 0usize;
-                    sr2.distance = 0usize;
-                    sr2.score = kMinScore;
-                    max_distance = min(position.wrapping_add(1), max_backward_limit);
-                    let is_match_found: bool = hasher.FindLongestMatch(
-                        dictionary,
-                        dictionary_hash,
-                        ringbuffer,
-                        ringbuffer_mask,
-                        ringbuffer_break,
-                        dist_cache,
-                        position.wrapping_add(1),
-                        max_length,
-                        max_distance,
-                        gap,
-                        params.dist.max_distance,
-                        &mut sr2,
-                    );
-                    if is_match_found && (sr2.score >= sr.score.wrapping_add(cost_diff_lazy)) {
-                        position = position.wrapping_add(1);
-                        insert_length = insert_length.wrapping_add(1);
-                        sr = sr2;
-                        if {
-                            delayed_backward_references_in_row += 1;
-                            delayed_backward_references_in_row
-                        } < 4i32
-                            && (position.wrapping_add(hasher.HashTypeLength()) < pos_end)
-                        {
-                            break 'continue7;
-                        }
+                let mut sr2 = HasherSearchResult {
+                    len: 0,
+                    len_x_code: 0,
+                    distance: 0,
+                    score: 0,
+                };
+                sr2.len = if params.quality < 5 {
+                    min(sr.len.wrapping_sub(1), max_length)
+                } else {
+                    0usize
+                };
+                sr2.len_x_code = 0usize;
+                sr2.distance = 0usize;
+                sr2.score = kMinScore;
+                max_distance = min(position.wrapping_add(1), max_backward_limit);
+                let is_match_found: bool = hasher.FindLongestMatch(
+                    dictionary,
+                    dictionary_hash,
+                    ringbuffer,
+                    ringbuffer_mask,
+                    ringbuffer_break,
+                    dist_cache,
+                    position.wrapping_add(1),
+                    max_length,
+                    max_distance,
+                    gap,
+                    params.dist.max_distance,
+                    &mut sr2,
+                );
+                if is_match_found && (sr2.score >= sr.score.wrapping_add(cost_diff_lazy)) {
+                    position = position.wrapping_add(1);
+                    insert_length = insert_length.wrapping_add(1);
+                    sr = sr2;
+                    delayed_backward_references_in_row += 1;
+                    if delayed_backward_references_in_row < 4
+                        && position.wrapping_add(hasher.HashTypeLength()) < pos_end
+                    {
+                        max_length = max_length.wrapping_sub(1);
+                        continue;
                     }
-                    break 'break6;
                 }
-                max_length = max_length.wrapping_sub(1);
+                break;
             }
             apply_random_heuristics = position
                 .wrapping_add((2usize).wrapping_mul(sr.len))
@@ -2552,7 +2586,8 @@ fn CreateBackwardReferences<AH: AnyHasher>(
 }
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliCreateBackwardReferences<
-    Alloc: alloc::Allocator<u16>
+    Alloc: alloc::Allocator<u8>
+        + alloc::Allocator<u16>
         + alloc::Allocator<u32>
         + alloc::Allocator<u64>
         + alloc::Allocator<floatX>
@@ -2760,6 +2795,48 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
+        &mut UnionHasher::H58(ref mut hasher) => {
+            dispatch!(detect_level(), simd => {
+                let mut hasher = TaggedHasherSimd::new(simd, hasher);
+                CreateBackwardReferences(
+                    if params.use_dictionary { Some(dictionary) } else { None },
+                    &kStaticDictionaryHash[..],
+                    num_bytes,
+                    position,
+                    ringbuffer,
+                    ringbuffer_mask,
+                    ringbuffer_break,
+                    params,
+                    &mut hasher,
+                    dist_cache,
+                    last_insert_len,
+                    commands,
+                    num_commands,
+                    num_literals,
+                )
+            })
+        }
+        &mut UnionHasher::H68(ref mut hasher) => {
+            dispatch!(detect_level(), simd => {
+                let mut hasher = TaggedHasherSimd::new(simd, hasher);
+                CreateBackwardReferences(
+                    if params.use_dictionary { Some(dictionary) } else { None },
+                    &kStaticDictionaryHash[..],
+                    num_bytes,
+                    position,
+                    ringbuffer,
+                    ringbuffer_mask,
+                    ringbuffer_break,
+                    params,
+                    &mut hasher,
+                    dist_cache,
+                    last_insert_len,
+                    commands,
+                    num_commands,
+                    num_literals,
+                )
+            })
+        }
         &mut UnionHasher::H9(ref mut hasher) => CreateBackwardReferences(
             if params.use_dictionary {
                 Some(dictionary)

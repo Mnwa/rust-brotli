@@ -2,7 +2,7 @@ use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core;
 use core::cmp::{max, min};
 
-use fearless_simd::Simd;
+use fearless_simd::{Simd, SimdBase, SimdMask, u8x32};
 
 use super::hash_to_binary_tree::{
     Allocable, BackwardMatch, BackwardMatchMut, H10, H10Params, StoreAndFindMatchesH10Simd, Union1,
@@ -376,6 +376,7 @@ where
 
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn FindAllMatchesH10Simd<
     S: Simd,
     AllocU32: Allocator<u32>,
@@ -403,20 +404,12 @@ fn FindAllMatchesH10Simd<
     } else {
         64i32
     }) as usize;
-    let mut stop: usize = cur_ix.wrapping_sub(short_match_max_backward);
     let mut dict_matches = [kInvalidMatch; BROTLI_MAX_STATIC_DICTIONARY_MATCH_LEN + 1];
-    let mut i: usize;
-    if cur_ix < short_match_max_backward {
-        stop = 0usize;
-    }
-    i = cur_ix.wrapping_sub(1);
-    while i > stop && best_len <= 2 {
-        let mut prev_ix: usize = i;
-        let backward: usize = cur_ix.wrapping_sub(prev_ix);
-        if backward > max_backward {
-            break;
-        }
-        prev_ix &= ring_buffer_mask;
+    let mut backward = 1usize;
+    // Distance one usually wins immediately on repetitive input. Probe it before computing
+    // SIMD batch bounds so that common case retains the original scalar fast path.
+    if cur_ix > 1 && max_backward != 0 {
+        let prev_ix = cur_ix.wrapping_sub(1) & ring_buffer_mask;
         if data[cur_ix_masked] == data[prev_ix]
             && data[cur_ix_masked.wrapping_add(1)] == data[prev_ix.wrapping_add(1)]
         {
@@ -432,7 +425,71 @@ fn FindAllMatchesH10Simd<
                 matches_offset += 1;
             }
         }
-        i = i.wrapping_sub(1);
+        backward = 2;
+    }
+
+    if best_len <= 2 {
+        let max_short_distance = min(
+            short_match_max_backward - 1,
+            min(max_backward, cur_ix.saturating_sub(1)),
+        );
+        while backward <= max_short_distance && best_len <= 2 {
+            let nearest_prev_ix = cur_ix.wrapping_sub(backward) & ring_buffer_mask;
+            let remaining = max_short_distance - backward + 1;
+
+            // Candidate positions run backwards through the ring. When the next 32 are a
+            // contiguous memory range, reject their first two bytes in one SIMD compare.
+            // Matching lanes are still visited nearest-first, exactly like the scalar walk.
+            if remaining >= 32 && nearest_prev_ix >= 31 {
+                let block_start = nearest_prev_ix - 31;
+                let current_first = u8x32::splat(simd, data[cur_ix_masked]);
+                let current_second = u8x32::splat(simd, data[cur_ix_masked.wrapping_add(1)]);
+                let first_matches = u8x32::from_slice(simd, &data[block_start..block_start + 32])
+                    .simd_eq(current_first);
+                let second_matches =
+                    u8x32::from_slice(simd, &data[block_start + 1..block_start + 33])
+                        .simd_eq(current_second);
+                let mut candidates = (first_matches & second_matches).to_bitmask() as u32;
+
+                while candidates != 0 && best_len <= 2 {
+                    let lane = 31 - candidates.leading_zeros() as usize;
+                    candidates &= !(1u32 << lane);
+                    let candidate_backward = backward + (31 - lane);
+                    let prev_ix = block_start + lane;
+                    let len = FindMatchLengthWithLimitSimd(
+                        simd,
+                        &data[prev_ix..],
+                        &data[cur_ix_masked..],
+                        max_length,
+                    );
+                    if len > best_len {
+                        best_len = len;
+                        BackwardMatchMut(&mut matches[matches_offset])
+                            .init(candidate_backward, len);
+                        matches_offset += 1;
+                    }
+                }
+                backward += 32;
+            } else {
+                let prev_ix = nearest_prev_ix;
+                if data[cur_ix_masked] == data[prev_ix]
+                    && data[cur_ix_masked.wrapping_add(1)] == data[prev_ix.wrapping_add(1)]
+                {
+                    let len = FindMatchLengthWithLimitSimd(
+                        simd,
+                        &data[prev_ix..],
+                        &data[cur_ix_masked..],
+                        max_length,
+                    );
+                    if len > best_len {
+                        best_len = len;
+                        BackwardMatchMut(&mut matches[matches_offset]).init(backward, len);
+                        matches_offset += 1;
+                    }
+                }
+                backward += 1;
+            }
+        }
     }
     if best_len < max_length {
         let loc_offset = StoreAndFindMatchesH10Simd(
@@ -726,6 +783,7 @@ impl BackwardMatch {
 /// for each one.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn UpdateNodesSimd<S: Simd, AllocF: Allocator<floatX>>(
     simd: S,
     num_bytes: usize,
@@ -924,6 +982,7 @@ impl ZopfliNode {
 }
 
 #[inline(always)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ComputeShortestPathFromNodes(num_bytes: usize, nodes: &mut [ZopfliNode]) -> usize {
     let mut index: usize = num_bytes;
     let mut num_commands: usize = 0usize;
@@ -950,6 +1009,7 @@ const MAX_NUM_MATCHES_H10: usize = 128;
 /// the CPU on its own.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ShortestPathPositionsSimd<
     S: Simd,
     AllocU32: Allocator<u32>,

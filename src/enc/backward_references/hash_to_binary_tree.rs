@@ -511,6 +511,7 @@ pub fn StoreAndFindMatchesH10<
 /// takes an already-detected instruction set rather than probing per comparison.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn StoreAndFindMatchesH10Simd<
     S: Simd,
     AllocU32: Allocator<u32>,

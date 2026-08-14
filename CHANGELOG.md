@@ -1,5 +1,62 @@
 # Changelog
 
+## 9.1.1
+
+Improves quality-5/6 and quality-11 compression throughput with `fearless_simd`, and adds finer
+`hotpath` attribution for the match finders and Zopfli shortest-path work. The public API is
+unchanged; the MSRV remains 1.89.0.
+
+### SIMD tagged match finders
+
+- Quality 5 and 6 now select Brotli's H58/H68 tagged hash-table layout deterministically from the
+  input size and window. A compact byte tag rejects 16 or 32 candidates at once with
+  `fearless_simd::u8x16` or `u8x32`, so positions are loaded only for candidates whose tags match.
+  Large inputs with sufficient window use H68's five-byte hash; smaller inputs use H58.
+- This also avoids the old small-window H40 selection. H40 was not implemented and silently fell
+  back to H6 with the wrong default table dimensions, causing quality 6 to scan 256 candidates
+  instead of its intended 32.
+- On `testdata/random_then_unicode` at q6, Apple Silicon release builds with LTO improved from
+  561.6 ms to 493.4 ms over 20 runs: **12.1% less wall time, or 1.14x throughput**. On
+  `testdata/alice29.txt` with `-w15`, H58 improved from 339.7 ms to 244.9 ms: **27.9% less wall time,
+  or 1.39x throughput**.
+
+### SIMD recent-match filtering
+
+- The q11 H10 match finder previously screened as many as 63 recent positions with two scalar byte
+  comparisons per candidate. It now compares the first two bytes of 32 candidates at once with
+  `fearless_simd::u8x32`, then visits matching lanes nearest-first so Brotli's candidate ordering
+  and tie-breaking remain unchanged.
+- Distance one retains a scalar fast path. This avoids SIMD setup when repetitive input immediately
+  produces a long match, while varied input benefits from the wide rejection filter.
+- On `testdata/random_then_unicode` at q11, Apple Silicon release builds with LTO improved from
+  132.5 ms to 128.1 ms over 30 runs: **3.3% less wall time, or approximately 3.4% more throughput**.
+  The highly repetitive corpus remained effectively unchanged, within measurement variance; q10
+  is also unchanged because it does not have enough recent candidates for a 32-lane batch.
+
+### Profiling attribution
+
+- Added feature-gated `hotpath::measure` boundaries around the H5/H6 scalar matcher, H58/H68 tagged
+  matcher and its SIMD tag filter, plus `FindAllMatchesH10Simd`,
+  `StoreAndFindMatchesH10Simd`, `UpdateNodesSimd`, `ShortestPathPositionsSimd` and
+  `ComputeShortestPathFromNodes`. A default build compiles all instrumentation out.
+- On the same q11 input, the detailed report attributes 43.05 ms across 272,660 calls to the HQ
+  match finder, including 18.88 ms in its binary-tree walk, and 83.45 ms across 545,320 calls to
+  Zopfli node updates. These are inclusive instrumented totals, not end-to-end benchmark results.
+- On a q6 code-shaped sample, the tagged matcher accounts for 115.60 ms across 1,962,100 calls, or
+  57.53% of the instrumented run, while its SIMD tag filter accounts for 12.98 ms, or 6.46%.
+  Backward-reference generation is 86.93% in total, showing that matching-candidate validation is
+  now much more expensive than producing the tag mask.
+- Most instrumentation remains metablock-granular. The new HQ measurements deliberately run per
+  position to expose inclusive totals and call counts, so uninstrumented release builds should be
+  used for throughput comparisons.
+
+### Verification
+
+Quality-11 output was diffed against 9.1.0 on six varied, textual and repetitive corpora and every
+stream was byte-identical. Quality-6 H58 output was byte-identical on the main benchmark corpus;
+H58, H68 and the corrected small-window streams pass decompression round trips. The full test suite
+passes, as do default, `hotpath` and `no-default-features` builds.
+
 ## 9.1.0
 
 Adds a scoped multi-threaded entry point, `enc::threading::CompressMultiScoped`, which compresses

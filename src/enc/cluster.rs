@@ -180,13 +180,13 @@ pub fn BrotliHistogramCombine<
             }
         }
         i = 0usize;
-        'break9: while i < num_clusters {
+        while i < num_clusters {
             {
                 if clusters[i] == best_idx2 {
                     for offset in 0..(num_clusters - i - 1) {
                         clusters[i + offset] = clusters[i + 1 + offset];
                     }
-                    break 'break9;
+                    break;
                 }
             }
             i = i.wrapping_add(1);
@@ -197,28 +197,21 @@ pub fn BrotliHistogramCombine<
             let mut copy_to_idx: usize = 0usize;
             i = 0usize;
             while i < num_pairs {
-                'continue12: loop {
-                    {
-                        let p: HistogramPair = pairs[i];
-                        if (p).idx1 == best_idx1
-                            || (p).idx2 == best_idx1
-                            || (p).idx1 == best_idx2
-                            || (p).idx2 == best_idx2
-                        {
-                            /* Remove invalid pair from the queue. */
-                            break 'continue12;
-                        }
-                        if HistogramPairIsLess(&pairs[0], &p) {
-                            /* Replace the top of the queue if needed. */
-                            let front: HistogramPair = pairs[0];
-                            pairs[0] = p;
-                            pairs[copy_to_idx] = front;
-                        } else {
-                            pairs[copy_to_idx] = p;
-                        }
-                        copy_to_idx = copy_to_idx.wrapping_add(1);
+                let p: HistogramPair = pairs[i];
+                if (p).idx1 != best_idx1
+                    && (p).idx2 != best_idx1
+                    && (p).idx1 != best_idx2
+                    && (p).idx2 != best_idx2
+                {
+                    if HistogramPairIsLess(&pairs[0], &p) {
+                        /* Replace the top of the queue if needed. */
+                        let front: HistogramPair = pairs[0];
+                        pairs[0] = p;
+                        pairs[copy_to_idx] = front;
+                    } else {
+                        pairs[copy_to_idx] = p;
                     }
-                    break;
+                    copy_to_idx = copy_to_idx.wrapping_add(1);
                 }
                 i = i.wrapping_add(1);
             }

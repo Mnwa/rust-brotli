@@ -20,8 +20,8 @@ use fearless_simd::{Level, Simd, SimdBase, SimdInto, f32x8, i16x16, i32x8, u32x8
 #[cfg(feature = "std")]
 #[inline]
 pub fn detect_level() -> Level {
-    static LEVEL: std::sync::OnceLock<Level> = std::sync::OnceLock::new();
-    *LEVEL.get_or_init(|| Level::try_detect().unwrap_or_else(Level::baseline))
+    static LEVEL: std::sync::LazyLock<Level> = std::sync::LazyLock::new(|| Level::try_detect().unwrap_or_else(Level::baseline));
+    *LEVEL
 }
 
 /// See the `std` variant above; without `std` there is nothing to cache, as

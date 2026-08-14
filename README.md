@@ -389,10 +389,14 @@ The report prints on exit. `HOTPATH_OUTPUT_FORMAT=json-pretty` emits the full ta
 Measured stages: `encode_data`, `copy_input_to_ring_buffer`, `WriteMetaBlockInternal`,
 `ChooseContextMap`, `DecideOverLiteralContextModeling`, `compress_stream_fast`, the three
 `store_meta_block*` writers, `LogMetaBlock`, `BrotliCreateBackwardReferences` and the Zopfli
-entry points, `BrotliBuildMetaBlock`/`Greedy`/`BrotliOptimizeHistograms`, `BrotliSplitBlock`
-and its internals, the `cluster.rs` histogram-clustering functions,
-`BrotliEstimateBitCostsForLiterals`, and the two `compress_fragment` fast paths.
+entry points, the HQ match finder, binary-tree walk, Zopfli node update and shortest-path walk,
+the q5/q6 scalar and tagged match finders and the SIMD tag filter,
+`BrotliBuildMetaBlock`/`Greedy`/`BrotliOptimizeHistograms`, `BrotliSplitBlock` and its internals,
+the `cluster.rs` histogram-clustering functions, `BrotliEstimateBitCostsForLiterals`, and the two
+`compress_fragment` fast paths.
 
-Instrumentation sits at metablock granularity, not per-byte, so overhead is under measurement
-noise (q9/q10/q11 on a 3.9 MB corpus timed within 1% of an uninstrumented build). Leaf-level
-attribution inside a stage needs a sampling profiler (`sample` on macOS, `perf` on Linux).
+Most instrumentation sits at metablock granularity. The scalar, tagged and HQ match finders, tag
+filter, binary-tree walk and node update are deliberately measured per position so their inclusive
+totals and call counts can be compared directly; that extra detail adds profiler overhead. Use the
+report for attribution and an uninstrumented release build for end-to-end benchmarks.
+Instruction-level attribution still needs a sampling profiler (`sample` on macOS, `perf` on Linux).
