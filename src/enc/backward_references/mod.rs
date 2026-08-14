@@ -2098,6 +2098,7 @@ impl<
     }
 }
 
+#[non_exhaustive]
 pub enum UnionHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> {
     Uninit,
     H2(BasicHasher<H2Sub<Alloc>>),
