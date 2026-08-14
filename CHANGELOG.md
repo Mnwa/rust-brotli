@@ -1,5 +1,26 @@
 # Changelog
 
+## 9.1.2
+
+Implements Google Brotli's H40, H41 and H42 forgetful-chain match finders. The implementation uses
+allocator-backed storage and shares the C algorithm's bucket, bank and recent-distance behavior
+across three const-generic specializations.
+
+### Forgetful-chain hashers
+
+- Added complete prepare, store, chain traversal, recent-distance filtering and static-dictionary
+  fallback behavior for H40, H41 and H42.
+- Integrated all three hashers with construction, cloning, custom dictionaries, backward-reference
+  dispatch and allocator cleanup. Small-window quality-7/8 compression now uses H41 instead of
+  silently falling back to H6.
+- Added direct chain-match coverage for all three variants and an end-to-end H41 small-window
+  compression round trip.
+
+### Verification
+
+The full test suite, formatting checks and the default and `no-default-features` builds pass. The
+MSRV remains 1.89.0.
+
 ## 9.1.1
 
 Improves quality-5/6 and quality-11 compression throughput with `fearless_simd`, and adds finer

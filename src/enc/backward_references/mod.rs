@@ -1817,60 +1817,302 @@ impl<
     }
 }
 
-pub struct BankH40 {
-    pub slots: [SlotH40; 65536],
-}
+const FORGETFUL_BUCKET_BITS: usize = 15;
+const FORGETFUL_BUCKET_SIZE: usize = 1 << FORGETFUL_BUCKET_BITS;
+const FORGETFUL_TINY_HASH_SIZE: usize = 1 << 16;
 
-pub struct BankH41 {
-    pub slots: [SlotH41; 65536],
-}
-
-pub struct BankH42 {
-    pub slots: [SlotH42; 512],
-}
-
-pub struct SlotH40 {
-    pub delta: u16,
-    pub next: u16,
-}
-pub struct SlotH41 {
-    pub delta: u16,
-    pub next: u16,
-}
-
-pub struct SlotH42 {
-    pub delta: u16,
-    pub next: u16,
-}
-
-// UNSUPPORTED, for now.
-pub struct H40 {
+/// Google's forgetful-chain match finder. The three C specializations only
+/// differ in bank layout and in how many recent distances they inspect, so a
+/// const-generic implementation keeps their behavior in one place.
+pub struct ForgetfulHasher<
+    Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>,
+    const NUM_BANKS: usize,
+    const BANK_BITS: usize,
+    const NUM_LAST_DISTANCES_TO_CHECK: usize,
+> {
     pub common: Struct1,
-    pub addr: [u32; 32768],
-    pub head: [u16; 32768],
-    pub tiny_hash: [u8; 65536],
-    pub banks: [BankH40; 1],
-    pub free_slot_idx: [u16; 1],
+    pub addr: <Alloc as alloc::Allocator<u32>>::AllocatedMemory,
+    pub head: <Alloc as alloc::Allocator<u16>>::AllocatedMemory,
+    pub tiny_hash: <Alloc as alloc::Allocator<u8>>::AllocatedMemory,
+    /// A slot is packed as `delta | (next << 16)`.
+    pub slots: <Alloc as alloc::Allocator<u32>>::AllocatedMemory,
+    pub free_slot_idx: <Alloc as alloc::Allocator<u16>>::AllocatedMemory,
     pub max_hops: usize,
+    pub h9_opts: H9Opts,
 }
 
-pub struct H41 {
-    pub common: Struct1,
-    pub addr: [u32; 32768],
-    pub head: [u16; 32768],
-    pub tiny_hash: [u8; 65536],
-    pub banks: [BankH41; 1],
-    pub free_slot_idx: [u16; 1],
-    pub max_hops: usize,
+pub type H40<Alloc> = ForgetfulHasher<Alloc, 1, 16, 4>;
+pub type H41<Alloc> = ForgetfulHasher<Alloc, 1, 16, 10>;
+pub type H42<Alloc> = ForgetfulHasher<Alloc, 512, 9, 16>;
+
+impl<
+    Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>,
+    const NUM_BANKS: usize,
+    const BANK_BITS: usize,
+    const NUM_LAST_DISTANCES_TO_CHECK: usize,
+> PartialEq for ForgetfulHasher<Alloc, NUM_BANKS, BANK_BITS, NUM_LAST_DISTANCES_TO_CHECK>
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.common == other.common
+            && self.addr.slice() == other.addr.slice()
+            && self.head.slice() == other.head.slice()
+            && self.tiny_hash.slice() == other.tiny_hash.slice()
+            && self.slots.slice() == other.slots.slice()
+            && self.free_slot_idx.slice() == other.free_slot_idx.slice()
+            && self.max_hops == other.max_hops
+            && self.h9_opts == other.h9_opts
+    }
 }
 
-pub struct H42 {
-    pub common: Struct1,
-    pub addr: [u32; 32768],
-    pub head: [u16; 32768],
-    pub tiny_hash: [u8; 65536],
-    pub banks: [BankH42; 512],
-    pub max_hops: usize,
+impl<
+    Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>,
+    const NUM_BANKS: usize,
+    const BANK_BITS: usize,
+    const NUM_LAST_DISTANCES_TO_CHECK: usize,
+> ForgetfulHasher<Alloc, NUM_BANKS, BANK_BITS, NUM_LAST_DISTANCES_TO_CHECK>
+{
+    pub fn new(alloc: &mut Alloc, params: &BrotliEncoderParams) -> Self {
+        let mut addr = allocate::<u32, _>(alloc, FORGETFUL_BUCKET_SIZE);
+        addr.slice_mut().fill(0xcccc_cccc);
+        let mut head = allocate::<u16, _>(alloc, FORGETFUL_BUCKET_SIZE);
+        head.slice_mut().fill(0);
+        let mut tiny_hash = allocate::<u8, _>(alloc, FORGETFUL_TINY_HASH_SIZE);
+        tiny_hash.slice_mut().fill(0);
+        let mut free_slot_idx = allocate::<u16, _>(alloc, NUM_BANKS);
+        free_slot_idx.slice_mut().fill(0);
+        Self {
+            common: Struct1 {
+                params: params.hasher,
+                is_prepared_: 1,
+                dict_num_lookups: 0,
+                dict_num_matches: 0,
+            },
+            addr,
+            head,
+            tiny_hash,
+            slots: allocate::<u32, _>(alloc, NUM_BANKS << BANK_BITS),
+            free_slot_idx,
+            max_hops: (if params.quality > 6 { 7 } else { 8 })
+                << params.quality.saturating_sub(4) as usize,
+            h9_opts: H9Opts::new(&params.hasher),
+        }
+    }
+
+    pub fn free(&mut self, alloc: &mut Alloc) {
+        <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut self.addr));
+        <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut self.head));
+        <Alloc as Allocator<u8>>::free_cell(alloc, core::mem::take(&mut self.tiny_hash));
+        <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut self.slots));
+        <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut self.free_slot_idx));
+    }
+
+    #[inline(always)]
+    fn store(&mut self, data: &[u8], mask: usize, ix: usize) {
+        let key = self.HashBytes(&data[ix & mask..]);
+        let bank = key & (NUM_BANKS - 1);
+        let bank_size = 1usize << BANK_BITS;
+        let idx = self.free_slot_idx.slice()[bank] as usize & (bank_size - 1);
+        let next_free_slot = self.free_slot_idx.slice()[bank].wrapping_add(1);
+        self.free_slot_idx.slice_mut()[bank] = next_free_slot;
+        let delta = ix
+            .wrapping_sub(self.addr.slice()[key] as usize)
+            .min(u16::MAX as usize) as u16;
+        let next = self.head.slice()[key];
+        self.tiny_hash.slice_mut()[ix as u16 as usize] = key as u8;
+        self.slots.slice_mut()[bank * bank_size + idx] = u32::from(delta) | (u32::from(next) << 16);
+        self.addr.slice_mut()[key] = ix as u32;
+        self.head.slice_mut()[key] = idx as u16;
+    }
+}
+
+impl<
+    Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>,
+    const NUM_BANKS: usize,
+    const BANK_BITS: usize,
+    const NUM_LAST_DISTANCES_TO_CHECK: usize,
+> AnyHasher for ForgetfulHasher<Alloc, NUM_BANKS, BANK_BITS, NUM_LAST_DISTANCES_TO_CHECK>
+{
+    fn Opts(&self) -> H9Opts {
+        self.h9_opts
+    }
+
+    fn GetHasherCommon(&mut self) -> &mut Struct1 {
+        &mut self.common
+    }
+
+    fn HashBytes(&self, data: &[u8]) -> usize {
+        (BROTLI_UNALIGNED_LOAD32(data).wrapping_mul(kHashMul32) >> (32 - FORGETFUL_BUCKET_BITS))
+            as usize
+    }
+
+    fn HashTypeLength(&self) -> usize {
+        4
+    }
+
+    fn StoreLookahead(&self) -> usize {
+        4
+    }
+
+    fn PrepareDistanceCache(&self, distance_cache: &mut [i32]) {
+        adv_prepare_distance_cache(distance_cache, NUM_LAST_DISTANCES_TO_CHECK as i32);
+    }
+
+    fn FindLongestMatch(
+        &mut self,
+        dictionary: Option<&BrotliDictionary>,
+        dictionary_hash: &[u16],
+        data: &[u8],
+        ring_buffer_mask: usize,
+        ring_buffer_break: Option<core::num::NonZeroUsize>,
+        distance_cache: &[i32],
+        cur_ix: usize,
+        max_length: usize,
+        max_backward: usize,
+        gap: usize,
+        max_distance: usize,
+        out: &mut HasherSearchResult,
+    ) -> bool {
+        let cur_ix_masked = cur_ix & ring_buffer_mask;
+        let cur_data = &data[cur_ix_masked..];
+        let min_score = out.score;
+        let mut best_score = out.score;
+        let mut best_len = out.len;
+        let key = self.HashBytes(cur_data);
+        let tiny_hash = key as u8;
+        out.len = 0;
+        out.len_x_code = 0;
+
+        for (i, distance) in distance_cache
+            .iter()
+            .take(NUM_LAST_DISTANCES_TO_CHECK)
+            .enumerate()
+        {
+            let backward = *distance as usize;
+            let mut prev_ix = cur_ix.wrapping_sub(backward);
+            if i > 0 && self.tiny_hash.slice()[prev_ix as u16 as usize] != tiny_hash {
+                continue;
+            }
+            if prev_ix >= cur_ix || backward > max_backward {
+                continue;
+            }
+            prev_ix &= ring_buffer_mask;
+            let unbroken_len = FindMatchLengthWithLimit(&data[prev_ix..], cur_data, max_length);
+            if unbroken_len >= 2 {
+                let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
+                let mut score = BackwardReferenceScoreUsingLastDistance(len, self.h9_opts);
+                if best_score < score {
+                    if i != 0 {
+                        score = score.wrapping_sub(BackwardReferencePenaltyUsingLastDistance(i));
+                    }
+                    if best_score < score {
+                        best_score = score;
+                        best_len = len;
+                        out.len = len;
+                        out.distance = backward;
+                        out.score = score;
+                    }
+                }
+            }
+        }
+
+        best_len = best_len.max(3);
+        let bank = key & (NUM_BANKS - 1);
+        let bank_size = 1usize << BANK_BITS;
+        let mut backward = 0usize;
+        let mut delta = cur_ix.wrapping_sub(self.addr.slice()[key] as usize);
+        let mut slot = self.head.slice()[key] as usize;
+        for _ in 0..self.max_hops {
+            let last = slot;
+            backward = backward.wrapping_add(delta);
+            if backward > max_backward {
+                break;
+            }
+            let prev_ix = cur_ix.wrapping_sub(backward) & ring_buffer_mask;
+            let packed = self.slots.slice()[bank * bank_size + last];
+            slot = (packed >> 16) as usize;
+            delta = (packed & 0xffff) as usize;
+            if cur_ix_masked + best_len > ring_buffer_mask
+                || prev_ix + best_len > ring_buffer_mask
+                || BROTLI_UNALIGNED_LOAD32(&cur_data[best_len - 3..])
+                    != BROTLI_UNALIGNED_LOAD32(&data[prev_ix + best_len - 3..])
+            {
+                continue;
+            }
+            let unbroken_len = FindMatchLengthWithLimit(&data[prev_ix..], cur_data, max_length);
+            if unbroken_len >= 4 {
+                let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
+                let score = BackwardReferenceScore(len, backward, self.h9_opts);
+                if best_score < score {
+                    best_score = score;
+                    best_len = len;
+                    out.len = len;
+                    out.distance = backward;
+                    out.score = score;
+                }
+            }
+        }
+        self.store(data, ring_buffer_mask, cur_ix);
+
+        let mut found = out.score != min_score;
+        if !found && dictionary.is_some() {
+            found = SearchInStaticDictionary(
+                dictionary.unwrap(),
+                dictionary_hash,
+                self,
+                cur_data,
+                max_length,
+                max_backward.wrapping_add(gap),
+                max_distance,
+                out,
+                false,
+            );
+        }
+        found
+    }
+
+    fn Store(&mut self, data: &[u8], mask: usize, ix: usize) {
+        self.store(data, mask, ix);
+    }
+
+    fn StoreRange(&mut self, data: &[u8], mask: usize, ix_start: usize, ix_end: usize) {
+        for ix in ix_start..ix_end {
+            self.store(data, mask, ix);
+        }
+    }
+
+    fn BulkStoreRange(&mut self, data: &[u8], mask: usize, ix_start: usize, ix_end: usize) {
+        self.StoreRange(data, mask, ix_start, ix_end);
+    }
+
+    fn Prepare(&mut self, one_shot: bool, input_size: usize, data: &[u8]) -> HowPrepared {
+        if self.common.is_prepared_ != 0 {
+            return HowPrepared::ALREADY_PREPARED;
+        }
+        if one_shot && input_size <= (FORGETFUL_BUCKET_SIZE >> 6) {
+            for ix in 0..input_size {
+                let key = self.HashBytes(&data[ix..]);
+                self.addr.slice_mut()[key] = 0xcccc_cccc;
+                self.head.slice_mut()[key] = 0xcccc;
+            }
+        } else {
+            self.addr.slice_mut().fill(0xcccc_cccc);
+            self.head.slice_mut().fill(0);
+        }
+        self.tiny_hash.slice_mut().fill(0);
+        self.free_slot_idx.slice_mut().fill(0);
+        self.common.is_prepared_ = 1;
+        HowPrepared::NEWLY_PREPARED
+    }
+
+    fn StitchToPreviousBlock(
+        &mut self,
+        num_bytes: usize,
+        position: usize,
+        ringbuffer: &[u8],
+        ringbuffer_mask: usize,
+    ) {
+        StitchToPreviousBlockInternal(self, num_bytes, position, ringbuffer, ringbuffer_mask);
+    }
 }
 
 fn BackwardReferenceScoreUsingLastDistance(copy_length: usize, h9_opts: H9Opts) -> u64 {
@@ -2098,6 +2340,42 @@ impl<
     }
 }
 
+impl<
+    Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>,
+    const NUM_BANKS: usize,
+    const BANK_BITS: usize,
+    const NUM_LAST_DISTANCES_TO_CHECK: usize,
+> CloneWithAlloc<Alloc>
+    for ForgetfulHasher<Alloc, NUM_BANKS, BANK_BITS, NUM_LAST_DISTANCES_TO_CHECK>
+{
+    fn clone_with_alloc(&self, alloc: &mut Alloc) -> Self {
+        let mut addr = allocate::<u32, _>(alloc, self.addr.len());
+        addr.slice_mut().copy_from_slice(self.addr.slice());
+        let mut head = allocate::<u16, _>(alloc, self.head.len());
+        head.slice_mut().copy_from_slice(self.head.slice());
+        let mut tiny_hash = allocate::<u8, _>(alloc, self.tiny_hash.len());
+        tiny_hash
+            .slice_mut()
+            .copy_from_slice(self.tiny_hash.slice());
+        let mut slots = allocate::<u32, _>(alloc, self.slots.len());
+        slots.slice_mut().copy_from_slice(self.slots.slice());
+        let mut free_slot_idx = allocate::<u16, _>(alloc, self.free_slot_idx.len());
+        free_slot_idx
+            .slice_mut()
+            .copy_from_slice(self.free_slot_idx.slice());
+        Self {
+            common: self.common.clone(),
+            addr,
+            head,
+            tiny_hash,
+            slots,
+            free_slot_idx,
+            max_hops: self.max_hops,
+            h9_opts: self.h9_opts,
+        }
+    }
+}
+
 #[non_exhaustive]
 pub enum UnionHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> {
     Uninit,
@@ -2111,6 +2389,9 @@ pub enum UnionHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc
     H6(AdvHasher<H6Sub, Alloc>),
     H58(TaggedHasher<H58Sub, Alloc>),
     H68(TaggedHasher<H68Sub, Alloc>),
+    H40(H40<Alloc>),
+    H41(H41<Alloc>),
+    H42(H42<Alloc>),
     H9(H9<Alloc>),
     H10(H10<Alloc, H10Buckets<Alloc>, H10DefaultParams>),
 }
@@ -2159,6 +2440,18 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
                 UnionHasher::H68(ref otherh) => *hasher == *otherh,
                 _ => false,
             },
+            UnionHasher::H40(ref hasher) => match *other {
+                UnionHasher::H40(ref otherh) => *hasher == *otherh,
+                _ => false,
+            },
+            UnionHasher::H41(ref hasher) => match *other {
+                UnionHasher::H41(ref otherh) => *hasher == *otherh,
+                _ => false,
+            },
+            UnionHasher::H42(ref hasher) => match *other {
+                UnionHasher::H42(ref otherh) => *hasher == *otherh,
+                _ => false,
+            },
             UnionHasher::H9(ref hasher) => match *other {
                 UnionHasher::H9(ref otherh) => *hasher == *otherh,
                 _ => false,
@@ -2188,6 +2481,9 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
             UnionHasher::H6(ref hasher) => UnionHasher::H6(hasher.clone_with_alloc(m)),
             UnionHasher::H58(ref hasher) => UnionHasher::H58(hasher.clone_with_alloc(m)),
             UnionHasher::H68(ref hasher) => UnionHasher::H68(hasher.clone_with_alloc(m)),
+            UnionHasher::H40(ref hasher) => UnionHasher::H40(hasher.clone_with_alloc(m)),
+            UnionHasher::H41(ref hasher) => UnionHasher::H41(hasher.clone_with_alloc(m)),
+            UnionHasher::H42(ref hasher) => UnionHasher::H42(hasher.clone_with_alloc(m)),
             UnionHasher::H54(ref hasher) => UnionHasher::H54(hasher.clone_with_alloc(m)),
             UnionHasher::H9(ref hasher) => UnionHasher::H9(hasher.clone_with_alloc(m)),
             UnionHasher::H10(ref hasher) => UnionHasher::H10(hasher.clone_with_alloc(m)),
@@ -2207,6 +2503,9 @@ macro_rules! match_all_hashers_mut {
      &mut UnionHasher::H6(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H58(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H68(ref mut hasher) => hasher.$func_call($($args),*),
+     &mut UnionHasher::H40(ref mut hasher) => hasher.$func_call($($args),*),
+     &mut UnionHasher::H41(ref mut hasher) => hasher.$func_call($($args),*),
+     &mut UnionHasher::H42(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H54(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H9(ref mut hasher) => hasher.$func_call($($args),*),
      &mut UnionHasher::H10(ref mut hasher) => hasher.$func_call($($args),*),
@@ -2226,6 +2525,9 @@ macro_rules! match_all_hashers {
      &UnionHasher::H6(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H58(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H68(ref hasher) => hasher.$func_call($($args),*),
+     &UnionHasher::H40(ref hasher) => hasher.$func_call($($args),*),
+     &UnionHasher::H41(ref hasher) => hasher.$func_call($($args),*),
+     &UnionHasher::H42(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H54(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H9(ref hasher) => hasher.$func_call($($args),*),
      &UnionHasher::H10(ref hasher) => hasher.$func_call($($args),*),
@@ -2374,6 +2676,9 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
                 <Alloc as Allocator<u8>>::free_cell(alloc, core::mem::take(&mut hasher.tags));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
+            &mut UnionHasher::H40(ref mut hasher) => hasher.free(alloc),
+            &mut UnionHasher::H41(ref mut hasher) => hasher.free(alloc),
+            &mut UnionHasher::H42(ref mut hasher) => hasher.free(alloc),
             &mut UnionHasher::H9(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num_));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets_));
@@ -2776,6 +3081,66 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H6(ref mut hasher) => CreateBackwardReferences(
+            if params.use_dictionary {
+                Some(dictionary)
+            } else {
+                None
+            },
+            &kStaticDictionaryHash[..],
+            num_bytes,
+            position,
+            ringbuffer,
+            ringbuffer_mask,
+            ringbuffer_break,
+            params,
+            hasher,
+            dist_cache,
+            last_insert_len,
+            commands,
+            num_commands,
+            num_literals,
+        ),
+        &mut UnionHasher::H40(ref mut hasher) => CreateBackwardReferences(
+            if params.use_dictionary {
+                Some(dictionary)
+            } else {
+                None
+            },
+            &kStaticDictionaryHash[..],
+            num_bytes,
+            position,
+            ringbuffer,
+            ringbuffer_mask,
+            ringbuffer_break,
+            params,
+            hasher,
+            dist_cache,
+            last_insert_len,
+            commands,
+            num_commands,
+            num_literals,
+        ),
+        &mut UnionHasher::H41(ref mut hasher) => CreateBackwardReferences(
+            if params.use_dictionary {
+                Some(dictionary)
+            } else {
+                None
+            },
+            &kStaticDictionaryHash[..],
+            num_bytes,
+            position,
+            ringbuffer,
+            ringbuffer_mask,
+            ringbuffer_break,
+            params,
+            hasher,
+            dist_cache,
+            last_insert_len,
+            commands,
+            num_commands,
+            num_literals,
+        ),
+        &mut UnionHasher::H42(ref mut hasher) => CreateBackwardReferences(
             if params.use_dictionary {
                 Some(dictionary)
             } else {

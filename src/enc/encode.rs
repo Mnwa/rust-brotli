@@ -7,9 +7,9 @@ use super::super::alloc::{SliceWrapper, SliceWrapperMut};
 use super::backward_references::{
     AdvHashSpecialization, AdvHasher, AnyHasher, BasicHasher, BrotliCreateBackwardReferences,
     BrotliEncoderMode, BrotliEncoderParams, BrotliHasherParams, H2Sub, H3Sub, H4Sub, H5Sub, H6Sub,
-    H9, H9_BLOCK_BITS, H9_BLOCK_SIZE, H9_BUCKET_BITS, H9_NUM_LAST_DISTANCES_TO_CHECK, H54Sub,
-    H58Sub, H68Sub, HQ5Sub, HQ7Sub, HowPrepared, StoreLookaheadThenStore, Struct1, TaggedHasher,
-    UnionHasher,
+    H9, H9_BLOCK_BITS, H9_BLOCK_SIZE, H9_BUCKET_BITS, H9_NUM_LAST_DISTANCES_TO_CHECK, H40, H41,
+    H42, H54Sub, H58Sub, H68Sub, HQ5Sub, HQ7Sub, HowPrepared, StoreLookaheadThenStore, Struct1,
+    TaggedHasher, UnionHasher,
 };
 use super::bit_cost::{BitsEntropy, shannon_entropy};
 use super::brotli_bit_stream::{
@@ -1104,6 +1104,27 @@ fn InitializeH68<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Al
     ))
 }
 
+fn InitializeH40<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
+    alloc: &mut Alloc,
+    params: &BrotliEncoderParams,
+) -> H40<Alloc> {
+    H40::new(alloc, params)
+}
+
+fn InitializeH41<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
+    alloc: &mut Alloc,
+    params: &BrotliEncoderParams,
+) -> H41<Alloc> {
+    H41::new(alloc, params)
+}
+
+fn InitializeH42<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
+    alloc: &mut Alloc,
+    params: &BrotliEncoderParams,
+) -> H42<Alloc> {
+    H42::new(alloc, params)
+}
+
 fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
     m: &mut Alloc,
     params: &BrotliEncoderParams,
@@ -1134,17 +1155,15 @@ fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc:
     if hasher_type == 9i32 {
         return UnionHasher::H9(InitializeH9(m, params));
     }
-    /*
-        if hasher_type == 40i32 {
-          return InitializeH40(params);
-        }
-        if hasher_type == 41i32 {
-          return InitializeH41(params);
-        }
-        if hasher_type == 42i32 {
-          return InitializeH42(params);
-        }
-    */
+    if hasher_type == 40i32 {
+        return UnionHasher::H40(InitializeH40(m, params));
+    }
+    if hasher_type == 41i32 {
+        return UnionHasher::H41(InitializeH41(m, params));
+    }
+    if hasher_type == 42i32 {
+        return UnionHasher::H42(InitializeH42(m, params));
+    }
     if hasher_type == 54i32 {
         return UnionHasher::H54(InitializeH54(m, params));
     }
@@ -1233,6 +1252,9 @@ fn HasherPrependCustomDictionary<
         &mut UnionHasher::H6(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
         &mut UnionHasher::H58(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
         &mut UnionHasher::H68(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
+        &mut UnionHasher::H40(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
+        &mut UnionHasher::H41(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
+        &mut UnionHasher::H42(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
         &mut UnionHasher::H9(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
         &mut UnionHasher::H54(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
         &mut UnionHasher::H10(ref mut hasher) => StoreLookaheadThenStore(hasher, size, dict),
@@ -3123,6 +3145,8 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
 #[cfg(feature = "std")]
 mod test {
     #[cfg(test)]
+    use super::{AnyHasher, UnionHasher};
+    #[cfg(test)]
     use alloc_stdlib::StandardAlloc;
     #[cfg(test)]
     use std::vec::Vec;
@@ -3170,6 +3194,79 @@ mod test {
         let mut encoded = &compressed[..compressed_len];
         let mut roundtrip = Vec::with_capacity(input.len());
         crate::BrotliDecompress(&mut encoded, &mut roundtrip).expect("decompress H68 stream");
+        assert_eq!(roundtrip, input);
+    }
+
+    #[test]
+    fn forgetful_hashers_are_constructed_and_find_matches() {
+        let data = b"abcdefghijklmnopabcdefghijklmnop\0\0\0\0";
+        for (hasher_type, quality) in [(40, 6), (41, 7), (42, 9)] {
+            let mut params = super::BrotliEncoderInitParams();
+            params.quality = quality;
+            params.hasher.type_ = hasher_type;
+            let mut alloc = StandardAlloc::default();
+            let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None);
+            assert!(match (&hasher, hasher_type) {
+                (UnionHasher::H40(_), 40)
+                | (UnionHasher::H41(_), 41)
+                | (UnionHasher::H42(_), 42) => true,
+                _ => false,
+            });
+
+            hasher.Store(data, usize::MAX, 0);
+            let mut result = crate::enc::backward_references::HasherSearchResult {
+                len: 0,
+                len_x_code: 0,
+                distance: 0,
+                score: 0,
+            };
+            assert!(hasher.FindLongestMatch(
+                None,
+                &[],
+                data,
+                usize::MAX,
+                None,
+                &[i32::MAX; 16],
+                16,
+                16,
+                16,
+                0,
+                usize::MAX,
+                &mut result,
+            ));
+            assert_eq!(result.len, 16);
+            assert_eq!(result.distance, 16);
+            hasher.free(&mut alloc);
+        }
+    }
+
+    #[test]
+    fn quality_seven_small_window_uses_h41_and_round_trips() {
+        let mut params = super::BrotliEncoderInitParams();
+        params.quality = 7;
+        params.lgwin = 16;
+        super::ChooseHasher(&mut params);
+        assert_eq!(params.hasher.type_, 41);
+
+        let input = b"forgetful-chain-small-window-roundtrip\n".repeat(4096);
+        let mut compressed = vec![0; input.len() + 1024];
+        let mut compressed_len = compressed.len();
+        assert!(super::encoder_compress(
+            StandardAlloc::default(),
+            &mut StandardAlloc::default(),
+            7,
+            16,
+            super::BrotliEncoderMode::BROTLI_MODE_GENERIC,
+            input.len(),
+            &input,
+            &mut compressed_len,
+            &mut compressed,
+            &mut |_, _, _, _| (),
+        ));
+
+        let mut encoded = &compressed[..compressed_len];
+        let mut roundtrip = Vec::with_capacity(input.len());
+        crate::BrotliDecompress(&mut encoded, &mut roundtrip).expect("decompress H41 stream");
         assert_eq!(roundtrip, input);
     }
 
