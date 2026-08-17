@@ -1,5 +1,4 @@
 use core::cmp::{max, min};
-
 use fearless_simd::{Simd, SimdBase, SimdMask, u8x32};
 
 pub const kNumDistanceCacheEntries: usize = 4;
@@ -35,9 +34,8 @@ pub fn BrotliGetDictionary() -> &'static BrotliDictionary {
 }
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_LOAD32(sl: &[u8]) -> u32 {
-    let mut p = [0u8; 4];
-    p[..].copy_from_slice(sl.split_at(4).0);
-    (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16) | ((p[3] as u32) << 24)
+    debug_assert!(sl.len() >= size_of::<u32>());
+    (sl[0] as u32) | ((sl[1] as u32) << 8) | ((sl[2] as u32) << 16) | ((sl[3] as u32) << 24)
 }
 #[inline(always)]
 pub fn Hash(data: &[u8]) -> u32 {
@@ -46,19 +44,20 @@ pub fn Hash(data: &[u8]) -> u32 {
 }
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_LOAD64(sl: &[u8]) -> u64 {
-    let mut p = [0u8; 8];
-    p[..].copy_from_slice(sl.split_at(8).0);
-    (p[0] as u64)
-        | ((p[1] as u64) << 8)
-        | ((p[2] as u64) << 16)
-        | ((p[3] as u64) << 24)
-        | ((p[4] as u64) << 32)
-        | ((p[5] as u64) << 40)
-        | ((p[6] as u64) << 48)
-        | ((p[7] as u64) << 56)
+    debug_assert!(sl.len() >= size_of::<u64>());
+    (sl[0] as u64)
+        | ((sl[1] as u64) << 8)
+        | ((sl[2] as u64) << 16)
+        | ((sl[3] as u64) << 24)
+        | ((sl[4] as u64) << 32)
+        | ((sl[5] as u64) << 40)
+        | ((sl[6] as u64) << 48)
+        | ((sl[7] as u64) << 56)
 }
+
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_STORE64(outp: &mut [u8], v: u64) {
+    debug_assert!(outp.len() >= size_of::<u64>());
     let p = [
         (v & 0xff) as u8,
         ((v >> 8) & 0xff) as u8,
@@ -69,7 +68,7 @@ pub fn BROTLI_UNALIGNED_STORE64(outp: &mut [u8], v: u64) {
         ((v >> 48) & 0xff) as u8,
         ((v >> 56) & 0xff) as u8,
     ];
-    outp.split_at_mut(8).0.copy_from_slice(&p[..]);
+    outp[0..p.len()].copy_from_slice(&p[..]);
 }
 
 macro_rules! sub_match {
@@ -153,6 +152,7 @@ fn detect_and_wide_common_prefix(s1: &[u8], s2: &[u8], limit: usize) -> usize {
 
 /// [`FindMatchLengthWithLimit`] on an already-detected instruction set.
 #[inline(always)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn FindMatchLengthWithLimitSimd<S: Simd>(simd: S, s1: &[u8], s2: &[u8], limit: usize) -> usize {
     let s1 = &s1[..limit];
     let s2 = &s2[..limit];
@@ -196,16 +196,26 @@ fn narrow_common_prefix(s1: &[u8], s2: &[u8], limit: usize) -> Result<usize, usi
 #[inline(always)]
 fn wide_common_prefix<S: Simd>(simd: S, s1: &[u8], s2: &[u8], limit: usize) -> usize {
     let mut matched = 0usize;
-    while limit - matched >= 32 {
-        let equal = u8x32::from_slice(simd, &s1[matched..matched + 32])
-            .simd_eq(u8x32::from_slice(simd, &s2[matched..matched + 32]))
-            .to_bitmask() as u32;
+    let (s1_ch, s1_tail) = s1.as_chunks::<32>();
+    let (s2_ch, s2_tail) = s2.as_chunks::<32>();
+
+    for equal in s1_ch
+        .into_iter()
+        .zip(s2_ch.into_iter())
+        .map(|(s1, s2)| {
+            (
+                u8x32::load_array_ref(simd, s1),
+                u8x32::load_array_ref(simd, s2),
+            )
+        })
+        .map(|(s1, s2)| s1.simd_eq(s2).to_bitmask() as u32)
+    {
         if equal != u32::MAX {
             return matched + equal.trailing_ones() as usize;
         }
         matched += 32;
     }
-    matched + scalar_common_prefix(&s1[matched..], &s2[matched..], limit - matched)
+    matched + scalar_common_prefix(&s1_tail, &s2_tail, limit - matched)
 }
 
 /// Common prefix length of fewer than 32 remaining bytes: 64-bit steps, then bytes.
