@@ -74,9 +74,7 @@ pub struct H10Buckets<AllocU32: Allocator<u32>>(AllocU32::AllocatedMemory);
 impl<AllocU32: Allocator<u32>> Allocable<u32, AllocU32> for H10Buckets<AllocU32> {
     fn new(m: &mut AllocU32, initializer: u32) -> H10Buckets<AllocU32> {
         let mut ret = m.alloc_cell(1 << BUCKET_BITS);
-        for item in ret.slice_mut().iter_mut() {
-            *item = initializer;
-        }
+        ret.slice_mut().fill(initializer);
         H10Buckets::<AllocU32>(ret)
     }
     fn new_uninit(m: &mut AllocU32) -> H10Buckets<AllocU32> {
@@ -363,9 +361,7 @@ where
             return HowPrepared::ALREADY_PREPARED;
         }
         let invalid_pos = self.invalid_pos_;
-        for bucket in self.buckets_.slice_mut().iter_mut() {
-            *bucket = invalid_pos;
-        }
+        self.buckets_.slice_mut().fill(invalid_pos);
         self.common.is_prepared_ = 1;
         HowPrepared::NEWLY_PREPARED
     }

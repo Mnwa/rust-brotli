@@ -391,9 +391,7 @@ pub fn HistogramAddVector<
 pub fn HistogramClear<HistogramType: SliceWrapperMut<u32> + CostAccessors>(
     xself: &mut HistogramType,
 ) {
-    for data_elem in xself.slice_mut().iter_mut() {
-        *data_elem = 0;
-    }
+    xself.slice_mut().fill(0);
     xself.set_total_count(0);
     xself.set_bit_cost(3.402e+38);
 }

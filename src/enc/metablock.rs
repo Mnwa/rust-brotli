@@ -225,9 +225,7 @@ pub fn BrotliBuildMetaBlock<Alloc: BrotliAlloc>(
     if params.disable_literal_context_modeling == 0 {
         literal_context_multiplier = (1i32 << 6) as usize;
         literal_context_modes = allocate::<ContextType, _>(alloc, mb.literal_split.num_types);
-        for item in literal_context_modes.slice_mut().iter_mut() {
-            *item = literal_context_mode;
-        }
+        literal_context_modes.slice_mut().fill(literal_context_mode);
     }
     let literal_histograms_size: usize = mb
         .literal_split

@@ -482,9 +482,9 @@ fn LogMetaBlock<'a, Alloc: BrotliAlloc, Cb>(
             orig_offset: 0,
         },
     };
-    for item in prediction_mode.get_mixing_values_mut().iter_mut() {
-        *item = prior_eval::WhichPrior::STRIDE1 as u8;
-    }
+    prediction_mode
+        .get_mixing_values_mut()
+        .fill(prior_eval::WhichPrior::STRIDE1 as u8);
     prediction_mode
         .set_stride_context_speed([params.literal_adaptation[2], params.literal_adaptation[3]]);
     prediction_mode
@@ -955,9 +955,7 @@ pub fn BrotliBuildAndStoreHuffmanTreeFast<AllocHT: alloc::Allocator<HuffmanTree>
         bits[symbols[0] as usize] = 0u16;
         return;
     }
-    for depth_elem in depth[..(length as usize)].iter_mut() {
-        *depth_elem = 0; // memset
-    }
+    depth[..(length as usize)].fill(0); // memset
     {
         // FIXME: computation in u64, followed by allocation which might be less than u64
         let max_tree_size: u64 = (2u64).wrapping_mul(length).wrapping_add(1);
@@ -1477,9 +1475,7 @@ fn BuildAndStoreHuffmanTree(
         return;
     }
 
-    for depth_elem in depth[..histogram_length].iter_mut() {
-        *depth_elem = 0; // memset
-    }
+    depth[..histogram_length].fill(0); // memset
     BrotliCreateHuffmanTree(histogram, histogram_length, 15i32, tree, depth);
     BrotliConvertBitDepthsToSymbols(depth, histogram_length, bits);
     if count <= 4usize {

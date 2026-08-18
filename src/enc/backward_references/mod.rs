@@ -394,14 +394,10 @@ impl<T: SliceWrapperMut<u32> + SliceWrapper<u32> + BasicHashComputer> AnyHasher 
             for i in 0..input_size {
                 let key = self.HashBytes(&data[i..]);
                 let bs = self.buckets_.BUCKET_SWEEP() as usize;
-                for item in self.buckets_.slice_mut()[key..(key + bs)].iter_mut() {
-                    *item = 0;
-                }
+                self.buckets_.slice_mut()[key..(key + bs)].fill(0);
             }
         } else {
-            for item in self.buckets_.slice_mut().iter_mut() {
-                *item = 0;
-            }
+            self.buckets_.slice_mut().fill(0);
         }
         self.GetHasherCommon.is_prepared_ = 1;
         HowPrepared::NEWLY_PREPARED
@@ -961,9 +957,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
         if self.GetHasherCommon().is_prepared_ != 0 {
             return HowPrepared::ALREADY_PREPARED;
         }
-        for item in self.num_.slice_mut().iter_mut() {
-            *item = 0;
-        }
+        self.num_.slice_mut().fill(0);
         self.GetHasherCommon().is_prepared_ = 1;
         HowPrepared::NEWLY_PREPARED
     }
@@ -1561,11 +1555,7 @@ impl<
                 self.num.slice_mut()[key] = 0;
             }
         } else {
-            for item in
-                self.num.slice_mut()[..(self.specialization.bucket_size() as usize)].iter_mut()
-            {
-                *item = 0;
-            }
+            self.num.slice_mut()[..(self.specialization.bucket_size() as usize)].fill(0);
         }
         self.GetHasherCommon.is_prepared_ = 1;
         HowPrepared::NEWLY_PREPARED

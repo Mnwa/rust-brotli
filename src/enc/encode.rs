@@ -695,12 +695,8 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
             // if we want to properly concatenate, then we need to ignore any distances
             // this value 0x7ffffff0 was chosen to be larger than max_distance + gap
             // but small enough so that +/-3 will not overflow (due to distance modifications)
-            for item in self.dist_cache_.iter_mut() {
-                *item = 0x7ffffff0;
-            }
-            for item in self.saved_dist_cache_.iter_mut() {
-                *item = 0x7ffffff0;
-            }
+            self.dist_cache_.fill(0x7ffffff0);
+            self.saved_dist_cache_.fill(0x7ffffff0);
         }
         self.is_initialized_ = true;
         true
@@ -825,9 +821,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
             let start = (self.ringbuffer_)
                 .buffer_index
                 .wrapping_add((self.ringbuffer_).pos_ as usize);
-            for item in (self.ringbuffer_).data_mo.slice_mut()[start..(start + 7)].iter_mut() {
-                *item = 0;
-            }
+            (self.ringbuffer_).data_mo.slice_mut()[start..(start + 7)].fill(0);
         }
     }
 }
@@ -1767,9 +1761,7 @@ fn GetHashTableInternal<'a, AllocI32: alloc::Allocator<i32>>(
         table = large_table_.slice_mut();
     }
     *table_size = htsize;
-    for item in table[..htsize].iter_mut() {
-        *item = 0;
-    }
+    table[..htsize].fill(0);
     table // FIXME: probably need a macro to do this without borrowing the whole EncoderStateStruct
 }
 

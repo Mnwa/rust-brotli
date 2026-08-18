@@ -260,9 +260,7 @@ pub fn BrotliOptimizeHuffmanCountsForRle(
             return;
         }
     }
-    for rle_item in good_for_rle.iter_mut() {
-        *rle_item = 0;
-    }
+    good_for_rle.fill(0);
     {
         let mut symbol: u32 = counts[0];
         let mut step: usize = 0usize;

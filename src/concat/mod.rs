@@ -703,9 +703,7 @@ mod test {
         broccoli = BroCatli::deserialize_from_buffer(&buffer).unwrap();
         broccoli.serialize_to_buffer(&mut buffer2[..]).unwrap();
         broccoli = BroCatli::deserialize_from_buffer(&buffer2).unwrap();
-        for (_index, item) in buffer.iter_mut().enumerate() {
-            *item = 0;
-        }
+        buffer.fill(0);
         broccoli.serialize_to_buffer(&mut buffer[..]).unwrap();
         assert_eq!(&buffer[..], &buffer2[..]);
         for (index, item) in buffer.iter_mut().enumerate() {
@@ -715,9 +713,7 @@ mod test {
         broccoli = BroCatli::deserialize_from_buffer(&buffer).unwrap();
         broccoli.serialize_to_buffer(&mut buffer2[..]).unwrap();
         broccoli = BroCatli::deserialize_from_buffer(&buffer2).unwrap();
-        for (_index, item) in buffer.iter_mut().enumerate() {
-            *item = 0;
-        }
+        buffer.fill(0);
         broccoli.serialize_to_buffer(&mut buffer[..]).unwrap();
         assert_eq!(&buffer[..], &buffer2[..]);
     }

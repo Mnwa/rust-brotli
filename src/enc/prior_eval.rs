@@ -369,9 +369,9 @@ impl<'a, S: Simd> CDF<'a, S> {
 }
 
 pub fn init_cdfs(cdfs: &mut [s16]) {
-    for item in cdfs.iter_mut() {
-        *item = s16::from([4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64]);
-    }
+    cdfs.fill(s16::from([
+        4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64,
+    ]));
 }
 
 pub struct PriorEval<

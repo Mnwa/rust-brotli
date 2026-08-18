@@ -614,9 +614,7 @@ fn BuildAndStoreCommandPrefixCode(
     memcpy(bits, (56usize), &cmd_bits[..], 56usize, 8usize);
     BrotliConvertBitDepthsToSymbols(&mut depth[64..], 64usize, &mut bits[64..]);
     {
-        for item in cmd_depth[..64].iter_mut() {
-            *item = 0;
-        }
+        cmd_depth[..64].fill(0);
         memcpy(&mut cmd_depth[..], 0, depth, 0, 8usize);
         memcpy(&mut cmd_depth[..], 64usize, depth, (8usize), 8usize);
         memcpy(&mut cmd_depth[..], 128usize, depth, (16usize), 8usize);

@@ -76,9 +76,7 @@ fn init_cdfs(cdfs: &mut [u16]) {
                 .1
                 .split_at_mut(NUM_SPEEDS_TO_TRY)
                 .0;
-            for item in vec {
-                *item = 4 + 4 * cdf_index as u16;
-            }
+            vec.fill(4 + 4 * cdf_index as u16);
             total_index += NUM_SPEEDS_TO_TRY;
         }
         if total_index == len {

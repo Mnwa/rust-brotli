@@ -71,9 +71,7 @@ impl<AllocU32: alloc::Allocator<u32>> EntropyBucketPopulation<AllocU32> {
     // clear the allocated memory and reset literal population to zero
     fn bzero(&mut self) {
         self.cached_bit_entropy = 0.0;
-        for bp in self.bucket_populations.slice_mut().iter_mut() {
-            *bp = 0;
-        }
+        self.bucket_populations.slice_mut().fill(0);
     }
     // setup population to the sum of an array of populations where the stride of that row matches. Additionally allow another optional
     fn initiate_from(

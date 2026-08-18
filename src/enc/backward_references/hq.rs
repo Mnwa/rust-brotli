@@ -1740,16 +1740,13 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
                         pos.wrapping_add(1),
                         min(pos.wrapping_add(match_len), store_end),
                     );
-                    for item in num_matches
+                    num_matches
                         .slice_mut()
                         .split_at_mut(i.wrapping_add(1))
                         .1
                         .split_at_mut(skip)
                         .0
-                        .iter_mut()
-                    {
-                        *item = 0;
-                    }
+                        .fill(0);
                     i = i.wrapping_add(skip);
                 } else {
                     cur_match_pos = cur_match_end;

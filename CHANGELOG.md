@@ -32,6 +32,12 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
   scalar remainders and reverse block reconstruction. These APIs remain available to `no_std`
   builds.
 
+### Slice initialization
+
+- Constant-value slice initialization now uses `fill` instead of element-by-element assignment
+  loops throughout the encoder and concatenation code, without changing the initialized ranges or
+  values.
+
 ### Verification
 
 Formatting checks and the full test suite pass, as do the default and `no-default-features` builds.

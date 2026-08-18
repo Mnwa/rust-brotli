@@ -628,9 +628,7 @@ fn ClusterBlocks<
     <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut cluster_size));
 
     let mut new_index = allocate::<u32, _>(alloc, num_clusters);
-    for item in new_index.slice_mut().iter_mut() {
-        *item = kInvalidIndex;
-    }
+    new_index.slice_mut().fill(kInvalidIndex);
     pos = 0usize;
     {
         let mut next_index: u32 = 0u32;
