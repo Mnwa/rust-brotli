@@ -3,400 +3,314 @@
 [![crates.io](https://img.shields.io/crates/v/simd-brotli.svg)](https://crates.io/crates/simd-brotli)
 [![docs.rs](https://img.shields.io/docsrs/simd-brotli)](https://docs.rs/simd-brotli/)
 
-A brotli compressor and decompressor, forked from
-[`brotli`](https://crates.io/crates/brotli) with the encoder's hot paths rewritten to run on
-SIMD. It produces byte-identical output to the crate it forks; the difference is how fast it
-gets there.
+A Brotli compressor and decompressor whose encoder hot paths use runtime-dispatched SIMD. It is a
+fork of [`brotli`](https://crates.io/crates/brotli), produces byte-identical compressed output, and
+keeps the upstream API while using the crate name `simd_brotli` so both packages can coexist in one
+dependency graph.
+
+- Stable Rust with no `unsafe` in the Rust implementation
+- Runtime dispatch to AVX2, NEON, and other supported instruction sets
+- `no_std` support with pluggable allocators
+- Rust stream, low-level, command-line, and C-compatible interfaces
+
+## Installation
+
+Add the crate from the command line:
+
+```bash
+cargo add simd-brotli
+```
+
+Or add it to `Cargo.toml`:
 
 ```toml
 [dependencies]
-simd-brotli = "9.0"
+simd-brotli = "9.1"
 ```
 
+The default feature set enables the standard-library stream APIs. For a `no_std` project, disable
+default features:
+
+```toml
+[dependencies]
+simd-brotli = { version = "9.1", default-features = false }
+```
+
+The minimum supported Rust version is 1.89.0.
+
+## Quick start
+
+This example compresses into a `Vec<u8>` and then decompresses it again:
+
 ```rust
-use simd_brotli::CompressorWriter;
+use simd_brotli::{CompressorWriter, Decompressor};
+use std::io::{Read, Write};
+
+fn main() -> std::io::Result<()> {
+    let input = b"Brotli works especially well on repeated text. \
+                  Brotli works especially well on repeated text.";
+
+    let mut compressor = CompressorWriter::new(Vec::new(), 4096, 9, 22);
+    compressor.write_all(input)?;
+    let compressed = compressor.into_inner();
+
+    let mut decompressor = Decompressor::new(compressed.as_slice(), 4096);
+    let mut decoded = Vec::new();
+    decompressor.read_to_end(&mut decoded)?;
+
+    assert_eq!(decoded, input);
+    Ok(())
+}
+```
+
+The last two arguments to `CompressorWriter::new` are the quality and window size. Quality may be
+0–11; an `lgwin` value between 20 and 22 is a good general-purpose choice.
+
+## API examples
+
+Choose an adapter based on which side of your pipeline should implement `Read` or `Write`:
+
+| Task | Read adapter | Write adapter | Copy helper |
+| --- | --- | --- | --- |
+| Compress | `CompressorReader` | `CompressorWriter` | `BrotliCompress` |
+| Decompress | `Decompressor` | `DecompressorWriter` | `BrotliDecompress` |
+
+### Compress from a reader
+
+`CompressorReader` turns any `Read` input into a stream of compressed bytes:
+
+```rust
+use simd_brotli::CompressorReader;
+use std::io::{self, Cursor};
+
+fn main() -> io::Result<()> {
+    let source = Cursor::new(b"data to compress");
+    let mut compressed = CompressorReader::new(source, 4096, 9, 22);
+    io::copy(&mut compressed, &mut io::stdout())?;
+    Ok(())
+}
+```
+
+### Decompress into a writer
+
+`DecompressorWriter` accepts compressed bytes and forwards decoded bytes to its inner writer:
+
+```rust
+use simd_brotli::DecompressorWriter;
+use std::io::{self, Write};
+
+fn decode(compressed: &[u8]) -> io::Result<Vec<u8>> {
+    let mut decoder = DecompressorWriter::new(Vec::new(), 4096);
+    decoder.write_all(compressed)?;
+    decoder
+        .into_inner()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "incomplete Brotli stream"))
+}
+```
+
+### Copy a complete stream
+
+The copy helpers are convenient when the input and output already implement the standard I/O
+traits:
+
+```rust
+use simd_brotli::enc::BrotliEncoderParams;
+use simd_brotli::{BrotliCompress, BrotliDecompress};
+use std::io::{self, Cursor};
+
+fn main() -> io::Result<()> {
+    let original = b"compress a complete stream";
+    let mut params = BrotliEncoderParams::default();
+    params.quality = 9;
+    params.lgwin = 22;
+
+    let mut compressed = Vec::new();
+    BrotliCompress(&mut Cursor::new(original), &mut compressed, &params)?;
+
+    let mut decoded = Vec::new();
+    BrotliDecompress(&mut compressed.as_slice(), &mut decoded)?;
+    assert_eq!(decoded, original);
+    Ok(())
+}
+```
+
+Use `CompressorReader::with_params` or `CompressorWriter::with_params` when you need the same
+parameter control with a stream adapter.
+
+### Compress with multiple threads
+
+`CompressMultiScoped` splits borrowed input into independently compressed chunks and concatenates
+them into one Brotli stream. `StdThreadScope` uses scoped operating-system threads, so no input copy
+or thread pool is required:
+
+```rust
+use simd_brotli::enc::threading::{CompressMultiScoped, StdThreadScope};
+use simd_brotli::enc::{
+    BrotliEncoderMaxCompressedSizeMulti, BrotliEncoderParams, StandardAlloc,
+};
+use simd_brotli::BrotliDecompress;
+
+let input = vec![b'a'; 1 << 20];
+let thread_count = 4;
+let mut params = BrotliEncoderParams::default();
+params.quality = 9;
+
+let mut output = vec![
+    0;
+    BrotliEncoderMaxCompressedSizeMulti(input.len(), thread_count)
+];
+let mut allocators = vec![Some(StandardAlloc::default()); thread_count];
+
+let compressed_size = CompressMultiScoped(
+    &params,
+    &input,
+    &mut output,
+    &mut allocators,
+    &StdThreadScope,
+)
+.expect("threaded compression failed");
+output.truncate(compressed_size);
+
+let mut decoded = Vec::new();
+BrotliDecompress(&mut output.as_slice(), &mut decoded).unwrap();
+assert_eq!(decoded, input);
+```
+
+Use one allocator per chunk. For applications that already use Rayon, implement the lightweight
+`ThreadScope` adapter shown in its API documentation to run chunks on the existing pool.
+
+The repository also includes stdin/stdout examples:
+
+```bash
+cargo run --release --example compress < input.txt > input.txt.br
+cargo run --release --example decompress < input.txt.br > restored.txt
 ```
 
 ## What this fork changes
 
-* **Vectorized with [`fearless_simd`](https://crates.io/crates/fearless_simd)** instead of the
-  old `packed_simd`/`stdsimd` shims, so the wide paths build on **stable** Rust with **no
-  `unsafe`** and no nightly-only features. The instruction set is picked at runtime — an AVX2
-  machine takes the AVX2 path, an Apple Silicon machine takes the NEON path, from the same
-  binary — and `no_std` builds still work, falling back to the level the crate was compiled
-  for.
-* **More of the encoder is vectorized than upstream.** Upstream only vectorized a couple of
-  cost loops; this fork also runs the H10 match finder, the Zopfli node update, the static
-  dictionary's match-length probe, block splitting's per-histogram cost scan, and the
-  population-cost walk on wide lanes.
-* **Hot-path algorithmic work**, most visibly histogram clustering, which now costs the sum of
-  two histograms without materializing it.
-* **A built-in profiler.** `--features hotpath` instruments the encoder pipeline stage by stage;
-  a default build neither links it nor pays for it. See
-  [Profiling the encoder](#profiling-the-encoder).
+- **Stable, runtime-dispatched SIMD.** [`fearless_simd`](https://crates.io/crates/fearless_simd)
+  selects an available implementation at runtime, so one standard-library build can use AVX2 on
+  compatible x86-64 machines and NEON on Apple Silicon. `no_std` builds use the SIMD level selected
+  at compile time.
+- **Broader encoder vectorization.** SIMD paths cover the H10 and tagged match finders, Zopfli node
+  updates, static-dictionary matching, block splitting, and population-cost calculations.
+- **Hot-path algorithm improvements.** Histogram clustering, for example, calculates the cost of
+  combined histograms without materializing their sum.
+- **Optional profiling.** Feature-gated instrumentation attributes encoder time or allocations by
+  pipeline stage without affecting default builds.
 
-Compressed output is unchanged: every optimization here is bit-identical to the scalar code it
-replaces, so streams stay byte-for-byte the same as upstream's and the format guarantees below
-still hold. This is checked, not assumed — output is diffed against the upstream base across
-qualities 0–11 (including 9.5, 9.5x and 9.5y) on four corpora, and all 60 pairs match byte for
-byte.
+Compressed streams remain byte-for-byte identical to the upstream implementation. The test matrix
+compares qualities 0–11, including the 9.5 variants, across multiple corpora. On one 3.1 MB varied
+corpus (Apple M5 Pro, NEON, release with LTO), encoding was about 11% faster at q9, 15% at q10, and
+8% at q11. Results depend on the CPU and input, so benchmark your own workload.
 
-On a 3.1 MB varied corpus (Apple M5 Pro, NEON, release + LTO, best of three) the fork encodes
-about **11% faster at q9, 15% at q10 and 8% at q11**. The win depends on your CPU's instruction
-set and on how much of your input reaches the slow paths, so measure your own workload. See
-[CHANGELOG.md](CHANGELOG.md) for the full list of changes.
+See the [changelog](CHANGELOG.md) for release details and verification results.
 
-The library is named `simd_brotli`, not `brotli`, so it can coexist with the upstream crate in
-one dependency graph. Migrating from `brotli` is a rename of the import; the API is otherwise
-untouched.
+## Migrating from `brotli`
 
-# What's new in 8.0.4
-Fix: adjust versions of rust-decompressor and rust-alloc-no-stdlib and
-alloc-stdlib so the Allocator<> trait is identical for all associated crates.
-Return BrotliFileNotCraftedForConcatenation when a new stream header advertises more whole source bytes than have been buffered. This prevents the unsigned subtraction in shift_and_check_new_stream_header from underflowing on truncated metadata headers.
-Return NULL from BrotliEncoderCreateInstance and BrotliEncoderCreateWorkPool when a caller-provided allocator returns NULL, rather than writing state through a NULL pointer.
-Wrap the mutable Broccoli FFI entry points in a local catch_unwind helper, matching the encoder FFI convention so Rust panics do not unwind across extern C when std panic catching is available.
-Return BrotliFileNotCraftedForConcatenation on caught panics and keep the existing pass-through behavior for no-std or pass-through-ffi-panics builds. Add regression coverage for a crafted stream input that previously panicked through BroccoliConcatStream.
-Reject serialized BroCatli buffers with out-of-range live state fields before constructing the state. This keeps deserialize_from_buffer on its existing Result<BroCatli, ()> API while returning Err(()) for corrupt buffers that would otherwise panic on later use
-
-## What's new in 8.0.3
-Fix: avoid panic across Broccoli FFI boundary with BroCatLi
-Fix: CompressMulti worker joins on errors
-
-
-## What's new in 8.0.2
-Fix for memory leak in ffi API
-
-## What's new in 8.0.1
-Compatibility for ffi builds
-
-## What's new in 8.0.0
-* Fixed LZ77 to comply with the specification
-  * No longer seed the context by the end of the lz77 dictionary. Instead use
-    zero for the seed as would happen without a dictionary. This matches the
-    behavior of brotli with a custom dictionary as specified in
-  * https://datatracker.ietf.org/doc/draft-vandevenne-shared-brotli-format/
-
-## What's new in 7.0.0
-* Fix error with short writes
-* allow quality=10 for certain APIs and make it default to 9.5
-
-## What's new in 6.0.0
-  * Remove unused SIMD use statements
-  * hide a few warnings - these are TODOs, and should be fixed in separate PRs
-  * do NOT build SIMD as part of MSRV -- doesn't make any sense to combine nightly with MSRV
-
-## What's new in 5.0.0
-* The FFI is no longer active by default to avoid ODR issues if multiple versions of brotli are included in several dependent crates.
-
-## What's new in 4.0.0
-Pinned to a rust-brotli-decompressor that can disable the ffi with the ffi-api
-flag.
-This can help avoid symbol conflicts with other brotli libs.
-
-## What's new in 3.5
-Updated SIMD support.
-Better CI integration.
-Cleaned up some of the clippy warnings.
-
-## What's new in 3.4
-Brotli decompressor's reader and writer has better behavior when operating upon brotli streams with extra bits at the end.
-Optional features like stdsimd are now tested or disabled for now.
-
-## What's new in 3.2
-* into_inner conversions for both Reader and Writer classes
-
-## What's new in 3.0
-* A fully compatible FFI for drop-in compatibiltiy with the https://github.com/google/brotli binaries
-  * custom allocators fully supported
-* Multithreaded compression so multiple threads can operate in unison on a single file
-* Concatenatability mode to add the feature requested in https://github.com/google/brotli/issues/628
-  * binary tool catbrotli can accomplish this if the first file was specified with -apendable and the second with -catable
-* validation mode where a file is double-checked to be able to be decompressed with the same settings; useful for benchmarking or fuzzing
-* Magic Number: where the brotli file can have a useful header with a few magic bytes, concatability info and a final output size for pre-allocating memory
-
-## What's new in 2.5
-* In 2.5 The callback also passes down an allocator to make new StaticCommands and PDFs and 256 bit floating point vectors.
-* In 2.4 The callback with the compression intermediate representation now passes a full metablock at a time. Also these items are mutable
-in case futher optimization is desired
-
-## What's new in 2.3
-
-* Flush now produces output instead of calling finish on the stream. This allows you to use the writer abstraction to
-get immediate output without having to resort to the CompressStream internal abstraction
-
-## Project Requirements
-
-Direct no-stdlib port of the C brotli compressor to Rust
-
-no dependency on the Rust stdlib: this library would be ideal for decompressing within a rust kernel among other things.
-
-This is useful to see how C and Rust compare in an apples-to-apples
-comparison where the same algorithms and data structures and
-optimizations are employed.
-
-## Compression Usage
-
-Rust brotli currently supports compression levels 0 - 11
-They should be bitwise identical to the brotli C compression engine at compression levels 0-9
-Recommended lg_window_size is between 20 and 22
-
-### With the io::Read abstraction
-```rust
-let mut input = simd_brotli::CompressorReader::new(&mut io::stdin(), 4096 /* buffer size */,
-                                              quality as u32, lg_window_size as u32);
-```
-then you can simply read input as you would any other io::Read class
-
-### With the io::Write abstraction
+Replace the package and change Rust imports from `brotli` to `simd_brotli`:
 
 ```rust
-let mut writer = simd_brotli::Compressor::new(&mut io::stdout(), 4096 /* buffer size */,
-                                         quality as u32, lg_window_size as u32);
+// Before: use brotli::CompressorWriter;
+use simd_brotli::CompressorWriter;
 ```
 
-There are also methods to build Compressor Readers or Writers using the with_params static function
+The public API is otherwise unchanged. The `brotli` and `catbrotli` binary names are also retained.
 
-eg:
-```rust
-let params = BrotliEncoderParams::default();
-// modify params to fit the application needs
-let mut writer = simd_brotli::Compressor::with_params(&mut io::stdout(), 4096 /* buffer size */,
-                                         params);
-```
-or for the reader
-```rust
-let params = BrotliEncoderParams::default();
-// modify params to fit the application needs
-let mut writer = simd_brotli::CompressorReader::with_params(&mut io::stdin(), 4096 /* buffer size */,
-                                                       params);
-```
+## `no_std` and custom allocation
 
+Without the default `std` feature, use the custom-I/O and allocator-backed APIs. The low-level
+decompression flow mirrors the C API:
 
-### With the Stream Copy abstraction
+1. Provide allocators for bytes, `u32` values, and Huffman codes.
+2. Construct a `BrotliState`.
+3. Call `BrotliDecompressStream` until it returns success or failure.
 
-```rust
-match simd_brotli::BrotliCompress(&mut io::stdin(), &mut io::stdout(), &brotli_encoder_params) {
-    Ok(_) => {},
-    Err(e) => panic!("Error {:?}", e),
-}
-```
+This allows all working memory to be allocated up front, which is useful in kernels, embedded
+systems, and sandboxed processes. See the crate documentation and the `no_std` tests for complete
+allocator examples.
 
-## Decompression Usage
+## Command-line tools
 
-### With the io::Read abstraction
-
-```rust
-let mut input = simd_brotli::Decompressor::new(&mut io::stdin(), 4096 /* buffer size */);
-```
-then you can simply read input as you would any other io::Read class
-
-### With the io::Write abstraction
-
-```rust
-let mut writer = simd_brotli::DecompressorWriter::new(&mut io::stdout(), 4096 /* buffer size */);
-```
-
-### With the Stream Copy abstraction
-
-```rust
-match simd_brotli::BrotliDecompress(&mut io::stdin(), &mut io::stdout()) {
-    Ok(_) => {},
-    Err(e) => panic!("Error {:?}", e),
-}
-```
-
-### With manual memory management
-
-There are 3 steps to using brotli without stdlib
-
-1. setup the memory manager
-2. setup the BrotliState
-3. in a loop, call BrotliDecompressStream
-
-in Detail
-
-```rust
-// at global scope declare a MemPool type -- in this case we'll choose the heap to
-// avoid unsafe code, and avoid restrictions of the stack size
-
-declare_stack_allocator_struct!(MemPool, heap);
-
-// at local scope, make a heap allocated buffers to hold uint8's uint32's and huffman codes
-let mut u8_buffer = define_allocator_memory_pool!(4096, u8, [0; 32 * 1024 * 1024], heap);
-let mut u32_buffer = define_allocator_memory_pool!(4096, u32, [0; 1024 * 1024], heap);
-let mut hc_buffer = define_allocator_memory_pool!(4096, HuffmanCode, [0; 4 * 1024 * 1024], heap);
-let heap_u8_allocator = HeapPrealloc::<u8>::new_allocator(4096, &mut u8_buffer, bzero);
-let heap_u32_allocator = HeapPrealloc::<u32>::new_allocator(4096, &mut u32_buffer, bzero);
-let heap_hc_allocator = HeapPrealloc::<HuffmanCode>::new_allocator(4096, &mut hc_buffer, bzero);
-
-// At this point no more syscalls are going to be needed since everything can come from the allocators.
-
-// Feel free to activate SECCOMP jailing or other mechanisms to secure your application if you wish.
-
-// Now it's possible to setup the decompressor state
-let mut brotli_state = BrotliState::new(heap_u8_allocator, heap_u32_allocator, heap_hc_allocator);
-
-// at this point the decompressor simply needs an input and output buffer and the ability to track
-// the available data left in each buffer
-loop {
-    result = BrotliDecompressStream(&mut available_in, &mut input_offset, &input.slice(),
-                                    &mut available_out, &mut output_offset, &mut output.slice_mut(),
-                                    &mut written, &mut brotli_state);
-
-    // just end the decompression if result is BrotliResult::ResultSuccess or BrotliResult::ResultFailure
-}
-```
-
-This interface is the same interface that the C brotli decompressor uses
-
-Also feel free to use custom allocators that invoke Box directly.
-This example illustrates a mechanism to avoid subsequent syscalls after the initial allocation
-
-## Using the C interface
-
-rust-brotli is a drop-in replacement for the official https://github.com/google/brotli C
-implementation. That means you can use it from any place that supports that library.
-To build rust-brotli in this manner enter the c subdirectory and run make there
-
-cd c && make
-
-this should build c/target/release/libbrotli.so and should build the vanilla
-command line tool in C for compressing and decompressing any brotli file.
-
-the libbrotli.so in c/target/release should be able to replace any other libbrotli.so
-file, but with all the advantages of using safe rust (except in the FFI bindings)
-
-The code also allows a wider range of options, including forcing the prediction mode
-(eg UTF8 vs signed vs MSB vs LSB) and changing the weight of the literal cost from 540
- to other values.
-
-## Stream Concatenation
-
-Brotli supports creating streams that can be concatenated together, useful for streaming
-scenarios where you want to compress chunks independently but decompress as a single stream.
-
-### Simple Concatenation (Fast)
-
-Use `-bare -appendable` for the first file and `-bare -catable` for subsequent files.
-These can be combined using plain byte concatenation without special tools, with a
-finalization byte (`0x03`) added at the end:
+Build and run the compatible `brotli` CLI through Cargo:
 
 ```bash
-# Create the base file with header but no trailer (must specify window size)
-brotli -c -bare -appendable -w22 input1.txt > base.br
+cargo run --release --bin brotli -- -c -q9 input.txt output.br
+cargo run --release --bin brotli -- -d output.br restored.txt
+```
 
-# Create bare-catable streams (no header, no trailer, same window size!)
+## C interface
+
+The optional C interface is a drop-in replacement for the official
+[`google/brotli`](https://github.com/google/brotli) library. Build it from the `c` directory:
+
+```bash
+cd c
+make
+```
+
+This produces `c/target/release/libbrotli.so` and the C command-line tool. The Rust implementation
+is safe; the FFI bindings necessarily form an unsafe boundary.
+
+## Stream concatenation
+
+Brotli streams can be prepared as independently compressed chunks and joined for streaming use
+cases. All chunks must use the same window size.
+
+### Direct byte concatenation
+
+Use a bare appendable first stream and bare catable subsequent streams, then append the Brotli
+finalization byte:
+
+```bash
+brotli -c -bare -appendable -w22 input1.txt > base.br
 brotli -c -bare -catable -w22 input2.txt > part2.br
 brotli -c -bare -catable -w22 input3.txt > part3.br
-
-# Simple concatenation with finalization byte
-# Note: printf '\x03' adds the required final byte
 (cat base.br part2.br part3.br; printf '\x03') > combined.br
-
-# Decompress normally
 brotli -d combined.br -o output.txt
 ```
 
-**Advantages:**
-- Instant concatenation (no processing)
-- No special tools required
-- Bare streams can be appended in any order
+This method is fast because joining requires no Brotli processing. Catable streams automatically
+disable dictionary references across the chunk boundary.
 
-**Requirements:**
-- All files must use the same window size (`-w22` recommended)
-- First file: `-bare -appendable` (has header, no trailer)
-- Subsequent files: `-bare -catable` (no header, no trailer, no dictionary refs)
-- A final `0x03` byte must be appended to complete the stream
+### Size-optimized concatenation
 
-### Efficient Concatenation (Size-optimized)
-
-Use the `catbrotli` tool with `-catable` and `-appendable` flags for better compression
-at the cost of processing time:
+`catbrotli` spends CPU time processing the stream boundaries and can produce a smaller result:
 
 ```bash
-# Create files for catbrotli tool
 brotli -c -appendable input1.txt > appendable.br
 brotli -c -catable input2.txt > catable1.br
 brotli -c -catable input3.txt > catable2.br
-
-# Concatenate using catbrotli tool
 catbrotli appendable.br catable1.br catable2.br > combined.br
 ```
 
-**Tradeoff:** `catbrotli` produces smaller output but requires CPU time to process the
-streams intelligently. Use this when size matters more than concatenation speed.
+Parameter dependencies are normalized automatically by the library:
 
-### Technical Reference: Stream Parameter Interactions
+- `catable = true` also sets `appendable = true` and `use_dictionary = false`.
+- `bare_stream = true` also sets `byte_align = true`.
+- `appendable = false` sets `byte_align = false`.
 
-**Stream Types and Their Parameters:**
-
-| Stream Type | bare_stream | byte_align | appendable | catable | use_dictionary | Description |
-|-------------|-------------|------------|------------|---------|----------------|-------------|
-| Standard | false | false | false | false | true | Normal brotli stream with header and trailer |
-| First (simple concat) | true | true | true | false | true | Has header, no trailer - for simple `cat` concatenation |
-| Subsequent (simple concat) | true | true | true | true | false | No header, no trailer, no dict refs - append to first |
-| Appendable (catbrotli) | false | varies | true | false | true | For use with `catbrotli` tool |
-| Catable (catbrotli) | false | varies | true | true | false | For use with `catbrotli` tool |
-
-**Important Notes:**
-- **Parameter dependencies are applied automatically** by the library in both CLI and API usage
-- The library's `SanitizeParams` function ensures:
-  - `catable = true` → automatically sets `appendable = true` and `use_dictionary = false`
-  - `bare_stream = true` → automatically sets `byte_align = true`
-  - `!appendable` → automatically sets `byte_align = false`
-- When using `set_parameter()`, dependencies are applied immediately
-- When setting fields directly (e.g., `params.catable = true`), dependencies are applied during compression initialization
-- **No manual fixups needed** - the library handles all parameter dependencies
-- The `use_dictionary = false` for catable streams prevents references to bytes before the chunk boundary
-- Simple concatenation requires a final `0x03` byte to complete the stream
-- All concatenated streams must use the same window size
-
-**Example API Usage:**
-```rust
-// First file: -bare -appendable equivalent
-params.bare_stream = true;    // Sets bare_stream=true, byte_align=true (automatic)
-params.appendable = true;     // Sets appendable=true
-
-// Subsequent files: -bare -catable equivalent
-params.bare_stream = true;    // Sets bare_stream=true, byte_align=true (automatic)
-params.catable = true;        // Sets catable=true, appendable=true, use_dictionary=false (automatic)
-
-// All parameter dependencies are handled automatically by the library.
-// No manual fixups required - just set the primary flags you want.
-```
+These rules apply whether parameters are set through `set_parameter` or directly on
+`BrotliEncoderParams`.
 
 ## Profiling the encoder
 
-The encoder pipeline is instrumented with [hotpath](https://docs.rs/hotpath/). The
-instrumentation is behind `cfg_attr`, so a default build neither links `hotpath` nor pays any
-runtime cost; only `--features hotpath` turns it on.
+The optional [`hotpath`](https://docs.rs/hotpath/) instrumentation reports time or allocations for
+individual encoder stages:
 
 ```bash
-# wall-clock per pipeline stage
+# Wall-clock time
 cargo run --release --features hotpath --bin brotli -- -c -q11 input.bin /dev/null
 
-# CPU time instead of wall-clock
+# CPU time
 cargo run --release --features hotpath-cpu --bin brotli -- -c -q11 input.bin /dev/null
 
-# allocation counts/bytes instead of time
+# Allocation counts and bytes
 cargo run --release --features hotpath-alloc --bin brotli -- -c -q11 input.bin /dev/null
 ```
 
-The report prints on exit. `HOTPATH_OUTPUT_FORMAT=json-pretty` emits the full table as JSON
-(the default table view truncates to fit the terminal).
-
-Measured stages: `encode_data`, `copy_input_to_ring_buffer`, `WriteMetaBlockInternal`,
-`ChooseContextMap`, `DecideOverLiteralContextModeling`, `compress_stream_fast`, the three
-`store_meta_block*` writers, `LogMetaBlock`, `BrotliCreateBackwardReferences` and the Zopfli
-entry points, the HQ match finder, binary-tree walk, Zopfli node update and shortest-path walk,
-the q5/q6 scalar and tagged match finders and the SIMD tag filter,
-`BrotliBuildMetaBlock`/`Greedy`/`BrotliOptimizeHistograms`, `BrotliSplitBlock` and its internals,
-the `cluster.rs` histogram-clustering functions, `BrotliEstimateBitCostsForLiterals`, and the two
-`compress_fragment` fast paths.
-
-Most instrumentation sits at metablock granularity. The scalar, tagged and HQ match finders, tag
-filter, binary-tree walk and node update are deliberately measured per position so their inclusive
-totals and call counts can be compared directly; that extra detail adds profiler overhead. Use the
-report for attribution and an uninstrumented release build for end-to-end benchmarks.
-Instruction-level attribution still needs a sampling profiler (`sample` on macOS, `perf` on Linux).
+The report is printed when the process exits. Set `HOTPATH_OUTPUT_FORMAT=json-pretty` for the full
+report as JSON. Most measurements are taken once per metablock, but match-finder and Zopfli details
+are measured per position and add profiler overhead. Use an uninstrumented release build for
+end-to-end benchmarks and a sampling profiler such as `sample` or `perf` for instruction-level
+attribution.

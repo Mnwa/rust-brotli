@@ -371,7 +371,101 @@ profiling showed dominate compression time:
   explicit, as edition 2024 requires.
 - Removed the now-dead `extern crate` / SIMD `use` statements the old feature gate needed.
 
-### Upstream
+Earlier releases below are inherited from the upstream `brotli` crate.
 
-For changes inherited from `brotli` 8.0.4 and earlier, see the version history in
-[README.md](README.md#whats-new-in-804).
+## 8.0.4
+
+- Adjusted the versions of `rust-decompressor`, `rust-alloc-no-stdlib`, and `alloc-stdlib` so the
+  `Allocator` trait is identical across the associated crates.
+- Return `BrotliFileNotCraftedForConcatenation` when a new stream header advertises more whole
+  source bytes than have been buffered. This prevents an unsigned subtraction in
+  `shift_and_check_new_stream_header` from underflowing on truncated metadata headers.
+- Return `NULL` from `BrotliEncoderCreateInstance` and `BrotliEncoderCreateWorkPool` when a
+  caller-provided allocator returns `NULL`, rather than writing state through a null pointer.
+- Wrap the mutable Broccoli FFI entry points in a local `catch_unwind` helper, matching the encoder
+  FFI convention so Rust panics do not unwind across `extern C` when standard-library panic
+  catching is available.
+- Return `BrotliFileNotCraftedForConcatenation` on caught panics and retain the existing
+  pass-through behavior for `no_std` or `pass-through-ffi-panics` builds. Added regression coverage
+  for a crafted stream input that previously panicked through `BroccoliConcatStream`.
+- Reject serialized BroCatli buffers with out-of-range live-state fields before constructing the
+  state. `deserialize_from_buffer` keeps its existing `Result<BroCatli, ()>` API and returns
+  `Err(())` for corrupt buffers that would otherwise panic later.
+
+## 8.0.3
+
+- Avoid a panic across the Broccoli FFI boundary with BroCatLi.
+- Ensure `CompressMulti` workers join on errors.
+
+## 8.0.2
+
+- Fixed a memory leak in the FFI API.
+
+## 8.0.1
+
+- Added compatibility fixes for FFI builds.
+
+## 8.0.0
+
+- Fixed LZ77 to comply with the shared Brotli format specification. The context is no longer seeded
+  from the end of the LZ77 dictionary; it uses zero, matching Brotli with a custom dictionary as
+  described by the
+  [shared Brotli format draft](https://datatracker.ietf.org/doc/draft-vandevenne-shared-brotli-format/).
+
+## 7.0.0
+
+- Fixed errors with short writes.
+- Allowed quality 10 for certain APIs and changed their default to 9.5.
+
+## 6.0.0
+
+- Removed unused SIMD imports.
+- Hid several warnings retained as future work.
+- Stopped combining SIMD builds with the MSRV job because SIMD required nightly Rust.
+
+## 5.0.0
+
+- Disabled the FFI by default to avoid one-definition-rule issues when multiple Brotli versions
+  occur in a dependency graph.
+
+## 4.0.0
+
+- Pinned `rust-brotli-decompressor` to a release that can disable FFI through the `ffi-api` feature,
+  helping avoid symbol conflicts with other Brotli libraries.
+
+## 3.5
+
+- Updated SIMD support and CI integration.
+- Cleaned up Clippy warnings.
+
+## 3.4
+
+- Improved the behavior of Brotli decompressor readers and writers when streams have extra bits at
+  the end.
+- Tested optional features such as `stdsimd`, or disabled them where necessary.
+
+## 3.2
+
+- Added `into_inner` conversions for reader and writer types.
+
+## 3.0
+
+- Added a fully compatible FFI for drop-in use with the
+  [`google/brotli`](https://github.com/google/brotli) binaries, including custom allocators.
+- Added multithreaded compression of a single file.
+- Added concatenatable streams and the `catbrotli` binary.
+- Added a validation mode that checks decompression with the same settings, useful for benchmarks
+  and fuzzing.
+- Added an optional magic-number header carrying concatenation information and the final output
+  size for preallocation.
+
+## 2.5
+
+- In 2.5, the compression intermediate-representation callback began passing an allocator for new
+  static commands, PDFs, and 256-bit floating-point vectors.
+- In 2.4, the callback began receiving a complete, mutable metablock at a time.
+
+## 2.3
+
+- `flush` now produces output instead of finishing the stream, allowing immediate output through
+  the writer abstraction without using `CompressStream` directly.
