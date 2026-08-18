@@ -1,7 +1,11 @@
 use core;
 use core::cmp::min;
 
-use fearless_simd::{Level, Select, Simd, SimdBase, f32x8, i16x16};
+#[cfg(not(feature = "float64"))]
+use fearless_simd::f32x8 as FloatX8;
+#[cfg(feature = "float64")]
+use fearless_simd::f64x8 as FloatX8;
+use fearless_simd::{Level, Select, Simd, SimdBase, i16x16};
 
 use super::super::alloc;
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
@@ -581,8 +585,8 @@ impl<'a, Alloc: alloc::Allocator<s16> + alloc::Allocator<u32> + alloc::Allocator
         cm_prior: usize,
         literal: u8,
     ) {
-        let mut l_score = f32x8::splat(simd, 0.0);
-        let mut h_score = f32x8::splat(simd, 0.0);
+        let mut l_score = FloatX8::splat(simd, 0.0);
+        let mut h_score = FloatX8::splat(simd, 0.0);
         let base_stride_prior =
             stride_prior[stride_prior_offset.wrapping_sub(self.cur_stride as usize) & 7];
         let hscore_index = upper_score_index(base_stride_prior, selected_bits, cm_prior);

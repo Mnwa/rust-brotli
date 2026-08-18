@@ -10,6 +10,8 @@ use core::ops::{Index, IndexMut};
 use core::slice::SliceIndex;
 
 use fearless_simd::{Level, Simd, SimdBase, SimdInto, f32x8, i16x16, i32x8, u32x8};
+#[cfg(feature = "float64")]
+use fearless_simd::{f64x8, u64x8};
 
 /// The instruction set the vectorized encoder paths run on.
 ///
@@ -45,6 +47,26 @@ pub fn min_lane_f32x8<S: Simd>(v: f32x8<S>) -> f32 {
 /// The smallest lane of `v`, folded in `log2(8)` steps.
 #[inline(always)]
 pub fn min_lane_u32x8<S: Simd>(v: u32x8<S>) -> u32 {
+    let v = v.min(v.slide::<4>(v));
+    let v = v.min(v.slide::<2>(v));
+    let v = v.min(v.slide::<1>(v));
+    v[0]
+}
+
+/// The smallest lane of `v`, folded in `log2(8)` steps.
+#[cfg(feature = "float64")]
+#[inline(always)]
+pub fn min_lane_f64x8<S: Simd>(v: f64x8<S>) -> f64 {
+    let v = v.min(v.slide::<4>(v));
+    let v = v.min(v.slide::<2>(v));
+    let v = v.min(v.slide::<1>(v));
+    v[0]
+}
+
+/// The smallest lane of `v`, folded in `log2(8)` steps.
+#[cfg(feature = "float64")]
+#[inline(always)]
+pub fn min_lane_u64x8<S: Simd>(v: u64x8<S>) -> u64 {
     let v = v.min(v.slide::<4>(v));
     let v = v.min(v.slide::<2>(v));
     let v = v.min(v.slide::<1>(v));
@@ -96,7 +118,10 @@ macro_rules! define_vector {
     };
 }
 
+#[cfg(not(feature = "float64"))]
 define_vector!(Mem256f, f32, 8, f32x8);
+#[cfg(feature = "float64")]
+define_vector!(Mem256f, f64, 8, f64x8);
 define_vector!(Mem256i, i32, 8, i32x8);
 define_vector!(Mem16x16, i16, 16, i16x16);
 define_vector!(

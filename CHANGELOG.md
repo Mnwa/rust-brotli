@@ -60,6 +60,9 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
 - `FindBlocksSimd` now uses core slice and iterator operations for initialization, cost chunks,
   scalar remainders and reverse block reconstruction. These APIs remain available to `no_std`
   builds.
+- The `float64` feature now uses native `f64x8` cost vectors (and `u64x8` winner indices) in the
+  block splitter and prior-context evaluator. All eight lanes remain vectorized without narrowing
+  64-bit costs through `f32` storage.
 
 ### Slice initialization
 
@@ -81,7 +84,8 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
 
 ### Verification
 
-Formatting checks and the full test suite pass, as do the default and `no-default-features` builds.
+Formatting checks and the full test suite pass, as do the default, `float64`,
+`no-default-features + float64`, and `float64 + hotpath` builds.
 `cargo-semver-checks --default-features` identified the intentional `Union1` enum-to-struct change
 as a breaking change under a patch release; it accepts the resulting 10.0.0 major version.
 Quality-6 and quality-11 output is byte-identical to the pre-change implementation across six

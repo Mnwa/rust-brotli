@@ -135,11 +135,17 @@ fn test_custom_dict_alice() {
     vec.extend(dict);
     super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)).unwrap();
     assert_eq!(rt.data(), raw.data());
-    // Platform-specific compression sizes - exact size varies by architecture and optimizations
-    if br.data().len() != 43860 && br.data().len() != 43836 && br.data().len() != 43857 {
+    // Platform-specific compression sizes - exact size varies by architecture, floating-point
+    // precision and optimizations.
+    #[cfg(not(feature = "float64"))]
+    let expected_sizes = &[43860, 43836, 43857][..];
+    #[cfg(feature = "float64")]
+    let expected_sizes = &[43922][..];
+    if !expected_sizes.contains(&br.data().len()) {
         panic!(
-            "Unexpected compressed size: {} (expected 43860, 43836, or 43857)",
-            br.data().len()
+            "Unexpected compressed size: {} (expected one of {:?})",
+            br.data().len(),
+            expected_sizes,
         );
     }
 }
