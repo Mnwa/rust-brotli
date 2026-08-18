@@ -110,7 +110,8 @@ impl Buckets for Own<'_> {
     }
     #[inline(always)]
     fn chunk<S: Simd>(&self, simd: S, at: usize) -> u32x16<S> {
-        u32x16::from_slice(simd, &self.0[at..at + 16])
+        let (chunks, _) = self.0[at..].as_chunks::<16>();
+        u32x16::load_array_ref(simd, &chunks[0])
     }
 }
 
@@ -125,8 +126,9 @@ impl Buckets for Sum<'_> {
     }
     #[inline(always)]
     fn chunk<S: Simd>(&self, simd: S, at: usize) -> u32x16<S> {
-        u32x16::from_slice(simd, &self.0[at..at + 16])
-            + u32x16::from_slice(simd, &self.1[at..at + 16])
+        let (left, _) = self.0[at..].as_chunks::<16>();
+        let (right, _) = self.1[at..].as_chunks::<16>();
+        u32x16::load_array_ref(simd, &left[0]) + u32x16::load_array_ref(simd, &right[0])
     }
 }
 

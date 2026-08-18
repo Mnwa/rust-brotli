@@ -1,5 +1,42 @@
 # Changelog
 
+## 9.1.3
+
+Reduces match-finding overhead by detecting the available SIMD level once at the encoder's outer
+entry points and reusing it throughout each compression pass. Existing public entry points remain
+available through compatibility wrappers, and the MSRV remains 1.89.0.
+
+### Reused SIMD dispatch
+
+- Backward-reference generation now carries one detected SIMD level through the scalar, tagged and
+  H9 match finders, static-dictionary searches and the quality-10/11 Zopfli paths instead of probing
+  the CPU again from nested common-prefix calls.
+- The fast one-pass and two-pass fragment encoders likewise detect once per compression call and
+  pass that level into every match-length search.
+- H58/H68 tagged matchers reuse their already-dispatched SIMD token directly when measuring
+  candidate matches, avoiding both redundant feature detection and nested SIMD dispatch.
+
+### Common-prefix scanning
+
+- Long matches are compared as 32-byte array chunks with `u8x32::load_array_ref`; the first unequal
+  lane still determines the exact match length, and the remaining tail keeps the scalar path.
+- The unaligned 32- and 64-bit helpers now assemble values directly from their input bytes instead
+  of copying through temporary arrays. Their bounds behavior and little-endian result are unchanged.
+
+### Typed SIMD loads and block splitting
+
+- Exact-width dynamic inputs in the block splitter, H10 and tagged matchers, and histogram-cost
+  paths are exposed as array chunks and loaded with `load_array_ref`; constant lane tables use
+  `load_array`. No SIMD `from_slice` loads remain in the encoder.
+- `FindBlocksSimd` now uses core slice and iterator operations for initialization, cost chunks,
+  scalar remainders and reverse block reconstruction. These APIs remain available to `no_std`
+  builds.
+
+### Verification
+
+Formatting checks and the full test suite pass, as do the default and `no-default-features` builds.
+`cargo-semver-checks` reports that no SemVer update beyond the patch release is required.
+
 ## 9.1.2
 
 Implements Google Brotli's H40, H41 and H42 forgetful-chain match finders. The implementation uses

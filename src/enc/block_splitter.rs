@@ -270,60 +270,73 @@ where
         return 0;
     }
     let data_size: usize = histograms[0].slice().len();
-    let bitmaplen: usize = num_histograms.wrapping_add(7) >> 3;
+    let bitmaplen = num_histograms.div_ceil(8);
     let mut num_blocks: usize = 1;
-    let mut i: usize;
     if num_histograms <= 1 {
-        for i in 0usize..length {
-            block_id[i] = 0u8;
-        }
+        block_id[..length].fill(0);
         return 1;
     }
-    for item in insert_cost[..(data_size * num_histograms)].iter_mut() {
-        *item = 0.0;
+    let insert_cost = &mut insert_cost[..(data_size * num_histograms)];
+    insert_cost.fill(0.0);
+    let (initial_costs, remaining_costs) = insert_cost.split_at_mut(num_histograms);
+    let histograms = &histograms[..num_histograms];
+    for (initial_cost, histogram) in initial_costs.iter_mut().zip(histograms) {
+        *initial_cost = FastLog2(histogram.total_count() as u32 as u64);
     }
-    for i in 0usize..num_histograms {
-        insert_cost[i] = FastLog2((histograms[i]).total_count() as u32 as (u64));
-    }
-    i = data_size;
-    while i != 0usize {
-        i = i.wrapping_sub(1);
-        for j in 0usize..num_histograms {
-            insert_cost[i.wrapping_mul(num_histograms).wrapping_add(j)] =
-                insert_cost[j] - BitCost((histograms[j]).slice()[i] as usize);
+    for (symbol, symbol_costs) in remaining_costs
+        .chunks_exact_mut(num_histograms)
+        .enumerate()
+        .rev()
+    {
+        let symbol = symbol + 1;
+        for ((symbol_cost, initial_cost), histogram) in symbol_costs
+            .iter_mut()
+            .zip(initial_costs.iter())
+            .zip(histograms)
+        {
+            *symbol_cost = *initial_cost - BitCost(histogram.slice()[symbol] as usize);
         }
     }
-    for item in cost.iter_mut() {
-        *item = Mem256f::default();
+    for (initial_cost, histogram) in initial_costs.iter_mut().zip(histograms) {
+        *initial_cost -= BitCost(histogram.slice()[0] as usize);
     }
-    for item in switch_signal[..(length * bitmaplen)].iter_mut() {
-        *item = 0;
-    }
-    for (byte_ix, data_byte_ix) in data[..length].iter().enumerate() {
-        let block_id_ptr = &mut block_id[byte_ix];
-        let ix: usize = byte_ix.wrapping_mul(bitmaplen);
+    cost.fill(Mem256f::default());
+    switch_signal[..(length * bitmaplen)].fill(0);
+    for (byte_ix, (data_byte_ix, block_id_ptr)) in data[..length]
+        .iter()
+        .zip(block_id[..length].iter_mut())
+        .enumerate()
+    {
+        let ix = byte_ix * bitmaplen;
         let insert_cost_ix: usize =
             u64::from(data_byte_ix.clone()).wrapping_mul(num_histograms as u64) as usize;
         let mut min_cost: floatX = 1e38;
         let mut block_switch_cost: floatX = block_switch_bitcost;
         // main (vectorized) loop
-        let insert_cost_slice = insert_cost.split_at(insert_cost_ix).1;
+        let insert_cost_slice = &insert_cost[insert_cost_ix..];
         let num_vectors = num_histograms >> 3;
+        let vectorized_offset = num_vectors << 3;
         // Running per-lane winner, reduced across lanes once the row is done rather than
         // once per vector.
         let mut min_lanes = f32x8::splat(simd, min_cost);
         let mut id_lanes = u32x8::splat(simd, u32::MAX);
-        for (v_index, cost_iter) in cost.split_at_mut(num_vectors).0.iter_mut().enumerate() {
+        let (insert_cost_chunks, insert_cost_tail) =
+            insert_cost_slice[..vectorized_offset].as_chunks::<8>();
+        debug_assert!(insert_cost_tail.is_empty());
+        for (v_index, (cost_iter, insert_costs)) in cost[..num_vectors]
+            .iter_mut()
+            .zip(insert_cost_chunks)
+            .enumerate()
+        {
             let base_index = v_index << 3;
-            let updated = cost_iter.to_simd(simd)
-                + f32x8::from_slice(simd, insert_cost_slice.split_at(base_index).1.split_at(8).0);
+            let updated = cost_iter.to_simd(simd) + f32x8::load_array_ref(simd, insert_costs);
             *cost_iter = Mem256f::from_simd(updated);
             // Strictly less, so a lane keeps the earliest histogram it tied with, exactly
             // as the scalar scan this replaces did.
             let improved = updated.simd_lt(min_lanes);
             min_lanes = improved.select(updated, min_lanes);
             id_lanes = improved.select(
-                u32x8::from_slice(simd, &LANE_INDICES) + base_index as u32,
+                u32x8::load_array(simd, LANE_INDICES) + base_index as u32,
                 id_lanes,
             );
         }
@@ -339,26 +352,21 @@ where
                 ) as u8;
             }
         }
-        let vectorized_offset = ((num_histograms >> 3) << 3);
-        let mut k = vectorized_offset;
-        //remainder loop for
-        for insert_cost_iter in insert_cost
-            .split_at(insert_cost_ix + vectorized_offset)
-            .1
-            .split_at(num_histograms & 7)
-            .0
+        // Scalar remainder for histogram counts that are not a multiple of eight.
+        for (lane, insert_cost) in insert_cost_slice[vectorized_offset..num_histograms]
             .iter()
+            .enumerate()
         {
-            let cost_iter = &mut cost[(k >> 3)];
-            cost_iter[k & 7] += *insert_cost_iter;
-            if cost_iter[k & 7] < min_cost {
-                min_cost = cost_iter[k & 7];
-                *block_id_ptr = k as u8;
+            let histogram_id = vectorized_offset + lane;
+            let scalar_cost = &mut cost[histogram_id >> 3][histogram_id & 7];
+            *scalar_cost += *insert_cost;
+            if *scalar_cost < min_cost {
+                min_cost = *scalar_cost;
+                *block_id_ptr = histogram_id as u8;
             }
-            k += 1;
         }
         if byte_ix < 2000usize {
-            block_switch_cost *= (0.77 + 0.07 * (byte_ix as floatX) / 2000.0);
+            block_switch_cost *= 0.77 + 0.07 * (byte_ix as floatX) / 2000.0;
         }
         update_cost_and_signal(
             simd,
@@ -370,23 +378,19 @@ where
             switch_signal,
         );
     }
+    let mut cur_id = block_id[length - 1];
+    for (signal, previous_id) in switch_signal[..(length * bitmaplen)]
+        .chunks_exact(bitmaplen)
+        .zip(block_id[..length].iter_mut())
+        .rev()
+        .skip(1)
     {
-        let mut byte_ix: usize = length.wrapping_sub(1);
-        let mut ix: usize = byte_ix.wrapping_mul(bitmaplen);
-        let mut cur_id: u8 = block_id[byte_ix];
-        while byte_ix > 0usize {
-            let mask: u8 = (1u32 << (cur_id as i32 & 7i32)) as u8;
-            byte_ix -= 1;
-            ix = ix.wrapping_sub(bitmaplen);
-            if switch_signal[ix.wrapping_add((cur_id as i32 >> 3) as usize)] as i32 & mask as i32
-                != 0
-                && cur_id as i32 != block_id[byte_ix] as i32
-            {
-                cur_id = block_id[byte_ix];
-                num_blocks = num_blocks.wrapping_add(1);
-            }
-            block_id[byte_ix] = cur_id;
+        let mask = 1u8 << (cur_id & 7);
+        if signal[(cur_id >> 3) as usize] & mask != 0 && cur_id != *previous_id {
+            cur_id = *previous_id;
+            num_blocks += 1;
         }
+        *previous_id = cur_id;
     }
     num_blocks
 }

@@ -353,7 +353,7 @@ impl<'a, S: Simd> CDF<'a, S> {
     #[inline(always)]
     pub fn update(&mut self, nibble_u8: u8, speed: (u16, u16)) {
         let simd = self.simd;
-        let one_to_16 = i16x16::from_slice(simd, &ONE_TO_16);
+        let one_to_16 = i16x16::load_array(simd, ONE_TO_16);
         let increment = i16x16::splat(simd, speed.0 as i16);
         // Bump every bucket at or above the coded nibble.
         let above_nibble = one_to_16.simd_gt(i16x16::splat(simd, i16::from(nibble_u8)));

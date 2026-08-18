@@ -447,11 +447,15 @@ fn FindAllMatchesH10Simd<
                 let block_start = nearest_prev_ix - 31;
                 let current_first = u8x32::splat(simd, data[cur_ix_masked]);
                 let current_second = u8x32::splat(simd, data[cur_ix_masked.wrapping_add(1)]);
-                let first_matches = u8x32::from_slice(simd, &data[block_start..block_start + 32])
-                    .simd_eq(current_first);
+                let (first_candidates, first_tail) =
+                    data[block_start..block_start + 32].as_chunks::<32>();
+                let (second_candidates, second_tail) =
+                    data[block_start + 1..block_start + 33].as_chunks::<32>();
+                debug_assert!(first_tail.is_empty() && second_tail.is_empty());
+                let first_matches =
+                    u8x32::load_array_ref(simd, &first_candidates[0]).simd_eq(current_first);
                 let second_matches =
-                    u8x32::from_slice(simd, &data[block_start + 1..block_start + 33])
-                        .simd_eq(current_second);
+                    u8x32::load_array_ref(simd, &second_candidates[0]).simd_eq(current_second);
                 let mut candidates = (first_matches & second_matches).to_bitmask() as u32;
 
                 while candidates != 0 && best_len <= 2 {

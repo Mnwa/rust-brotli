@@ -335,13 +335,17 @@ impl<
 fn matching_tag_mask<S: Simd>(simd: S, tag: u8, tags: &[u8], head: usize) -> u64 {
     match tags.len() {
         16 => {
-            let mask = u8x16::from_slice(simd, tags)
+            let (tag_chunks, tail) = tags.as_chunks::<16>();
+            debug_assert!(tail.is_empty());
+            let mask = u8x16::load_array_ref(simd, &tag_chunks[0])
                 .simd_eq(u8x16::splat(simd, tag))
                 .to_bitmask() as u16;
             mask.rotate_right(head as u32) as u64
         }
         32 => {
-            let mask = u8x32::from_slice(simd, tags)
+            let (tag_chunks, tail) = tags.as_chunks::<32>();
+            debug_assert!(tail.is_empty());
+            let mask = u8x32::load_array_ref(simd, &tag_chunks[0])
                 .simd_eq(u8x32::splat(simd, tag))
                 .to_bitmask() as u32;
             mask.rotate_right(head as u32) as u64
