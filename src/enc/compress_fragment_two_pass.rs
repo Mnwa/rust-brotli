@@ -428,7 +428,7 @@ fn ShouldCompress(input: &[u8], input_size: usize, num_literals: usize) -> bool 
             }
             i = i.wrapping_add(43);
         }
-        BitsEntropy(&mut literal_histo[..], 256) < max_total_bit_cost
+        BitsEntropy(&literal_histo[..], 256) < max_total_bit_cost
     }
 }
 
@@ -509,7 +509,7 @@ fn BuildAndStoreCommandPrefixCode(
     memcpy(bits, (24usize), cmd_bits, 0, 48usize);
     memcpy(bits, (48usize), cmd_bits, 32usize, 8usize);
     memcpy(bits, (56usize), cmd_bits, 48usize, 8usize);
-    BrotliConvertBitDepthsToSymbols(&mut depth[64..], 64usize, &mut bits[64..]);
+    BrotliConvertBitDepthsToSymbols(&depth[64..], 64usize, &mut bits[64..]);
     {
         cmd_depth[..64].fill(0);
         memcpy(&mut cmd_depth[..], 0, depth, (24usize), 8usize);
@@ -534,7 +534,7 @@ fn BuildAndStoreCommandPrefixCode(
         );
     }
     BrotliStoreHuffmanTreeWithScratch(
-        &mut depth[64..],
+        &depth[64..],
         64usize,
         tree,
         huffman_tree,
@@ -621,15 +621,14 @@ fn StoreCommands<AllocHT: alloc::Allocator<HuffmanTree>>(
         *_lhs = (*_lhs).wrapping_add(_rhs as u32);
     }
     BuildAndStoreCommandPrefixCode(
-        &mut cmd_histo[..],
+        &cmd_histo[..],
         &mut cmd_depths[..],
         &mut cmd_bits[..],
         command_prefix_scratch,
         storage_ix,
         storage,
     );
-    for i in 0usize..num_commands {
-        let cmd: u32 = commands[i];
+    for &cmd in commands.iter().take(num_commands) {
         let code: u32 = cmd & 0xffu32;
         let extra: u32 = cmd >> 8;
         BrotliWriteBits(

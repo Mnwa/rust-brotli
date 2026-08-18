@@ -41,7 +41,7 @@ pub struct UnlimitedBuffer {
 
 #[cfg(feature = "disable-timer")]
 fn now() -> Duration {
-    return Duration::new(0, 0);
+    Duration::new(0, 0)
 }
 #[cfg(not(feature = "disable-timer"))]
 fn now() -> SystemTime {
@@ -58,7 +58,7 @@ fn elapsed(start: SystemTime) -> (Duration, bool) {
 
 #[cfg(feature = "disable-timer")]
 fn elapsed(_start: Duration) -> (Duration, bool) {
-    return (Duration::new(0, 0), true);
+    (Duration::new(0, 0), true)
 }
 
 fn _write_all<OutputType>(w: &mut OutputType, buf: &[u8]) -> Result<(), io::Error>
@@ -608,18 +608,14 @@ fn writer_helper(mut in_buf: &[u8], buf_size: usize, q: u32, lgwin: u32, do_flus
                         }
                         Err(e) => panic!("Error {:?}", e),
                     }
-                    if do_flush {
-                        if let Err(e) = wenc.flush() {
-                            panic!("Error {:?}", e);
-                        }
+                    if do_flush && let Err(e) = wenc.flush() {
+                        panic!("Error {:?}", e);
                     }
                 }
             }
         }
         assert_eq!(output.data.len(), original_buf.len());
-        for i in 0..min(original_buf.len(), output.data.len()) {
-            assert_eq!(output.data[i], original_buf[i]);
-        }
+        assert_eq!(output.data.as_slice(), original_buf);
         in_buf = original_buf;
         let mut compressed = UnlimitedBuffer::new(&[]);
         {
@@ -668,10 +664,8 @@ fn into_inner_writer_helper(mut in_buf: &[u8], buf_size: usize, q: u32, lgwin: u
         Ok(_) => {}
         Err(e) => panic!("Error {:?}", e),
     }
-    for i in 0..orig_buf.len() {
-        assert_eq!(output.data[i], orig_buf[i]);
-    }
     assert_eq!(output.data.len(), orig_buf.len());
+    assert_eq!(output.data.as_slice(), orig_buf);
 }
 
 #[cfg(feature = "std")]

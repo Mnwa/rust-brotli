@@ -7,15 +7,15 @@ use alloc_stdlib::StandardAlloc;
 
 use super::*;
 
-static RANDOM_THEN_UNICODE: &'static [u8] = include_bytes!("../../../testdata/random_then_unicode");
-static FINALIZE_DATA: &'static [u8] = &[
+static RANDOM_THEN_UNICODE: &[u8] = include_bytes!("../../../testdata/random_then_unicode");
+static FINALIZE_DATA: &[u8] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
     26, 27, 28, 29, 20, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
     21, 22, 23, 24, 25, 26, 27, 28, 29, 20, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 20,
 ];
 const TEST_LEN: usize = 256 * 1024;
-const DISTANCE_CACHE: &'static [i32] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]; // distance cache
+const DISTANCE_CACHE: &[i32] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]; // distance cache
 
 fn make_generic_hasher() -> AdvHasher<H5Sub, StandardAlloc> {
     let params_hasher = BrotliHasherParams {
@@ -43,7 +43,7 @@ fn make_generic_hasher() -> AdvHasher<H5Sub, StandardAlloc> {
         specialization: H5Sub {
             hash_shift_: 32i32 - params_hasher.bucket_bits,
             bucket_size_: bucket_size as u32,
-            block_bits_: params_hasher.block_bits as i32,
+            block_bits_: params_hasher.block_bits,
             block_mask_: block_size.wrapping_sub(1) as u32,
         },
     }
@@ -93,6 +93,7 @@ fn bench_256k_basic_generic(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -123,6 +124,7 @@ fn bench_256k_basic_specialized(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -139,7 +141,7 @@ fn bench_256k_opt_generic(bench: &mut test::Bencher) {
     let mut hasher = make_generic_hasher();
     bench.iter(|| {
         let testdata = test::black_box(RANDOM_THEN_UNICODE.split_at(TEST_LEN + 8).0);
-        hasher.BulkStoreRangeOptBatch(testdata, usize::MAX, 0, TEST_LEN);
+        hasher.StoreRangeOptBatch(testdata, usize::MAX, 0, TEST_LEN);
         let mut output = super::HasherSearchResult {
             len: 0,
             len_x_code: 0,
@@ -151,6 +153,7 @@ fn bench_256k_opt_generic(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -167,7 +170,7 @@ fn bench_256k_opt_specialized(bench: &mut test::Bencher) {
     let mut hasher = make_specialized_hasher();
     bench.iter(|| {
         let testdata = test::black_box(RANDOM_THEN_UNICODE.split_at(TEST_LEN + 8).0);
-        hasher.BulkStoreRangeOptBatch(testdata, usize::MAX, 0, TEST_LEN);
+        hasher.StoreRangeOptBatch(testdata, usize::MAX, 0, TEST_LEN);
         let mut output = super::HasherSearchResult {
             len: 0,
             len_x_code: 0,
@@ -179,6 +182,7 @@ fn bench_256k_opt_specialized(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -207,6 +211,7 @@ fn bench_256k_mem_fetch_generic(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -235,6 +240,7 @@ fn bench_256k_mem_fetch_specialized(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -263,6 +269,7 @@ fn bench_256k_mem_lazy_dupe_generic(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -290,6 +297,7 @@ fn bench_256k_mem_lazy_dupe_specialized(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -318,6 +326,7 @@ fn bench_256k_mem_random_dupe_generic(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -346,6 +355,7 @@ fn bench_256k_mem_random_dupe_specialized(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -374,6 +384,7 @@ fn bench_256k_cur_generic(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,
@@ -402,6 +413,7 @@ fn bench_256k_cur_specialized(bench: &mut test::Bencher) {
             &[],
             test::black_box(FINALIZE_DATA), // data
             15,                             // ring mask
+            None,                           // no ring-buffer discontinuity
             DISTANCE_CACHE,
             8, // cur_x
             8,

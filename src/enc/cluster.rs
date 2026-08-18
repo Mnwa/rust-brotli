@@ -174,9 +174,9 @@ pub fn BrotliHistogramCombine<
             let _lhs = &mut cluster_size[(best_idx1 as usize)];
             *_lhs = (*_lhs).wrapping_add(_rhs);
         }
-        for i in 0usize..symbols_size {
-            if symbols[i] == best_idx2 {
-                symbols[i] = best_idx1;
+        for symbol in symbols.iter_mut().take(symbols_size) {
+            if *symbol == best_idx2 {
+                *symbol = best_idx1;
             }
         }
         i = 0usize;
@@ -217,12 +217,12 @@ pub fn BrotliHistogramCombine<
             }
             num_pairs = copy_to_idx;
         }
-        for i in 0usize..num_clusters {
+        for &cluster in clusters.iter().take(num_clusters) {
             BrotliCompareAndPushToQueue(
                 out,
                 cluster_size,
                 best_idx1,
-                clusters[i],
+                cluster,
                 max_num_pairs,
                 scratch_space,
                 pairs,
@@ -273,11 +273,11 @@ pub fn BrotliHistogramRemap<
             symbols[i.wrapping_sub(1)]
         };
         let mut best_bits: super::util::floatX =
-            BrotliHistogramBitCostDistance(&inp[i], &mut out[(best_out as usize)], scratch_space);
+            BrotliHistogramBitCostDistance(&inp[i], &out[(best_out as usize)], scratch_space);
         for j in 0usize..num_clusters {
             let cur_bits: super::util::floatX = BrotliHistogramBitCostDistance(
                 &inp[i],
-                &mut out[(clusters[j] as usize)],
+                &out[(clusters[j] as usize)],
                 scratch_space,
             );
             if cur_bits < best_bits {
@@ -318,13 +318,11 @@ pub fn BrotliHistogramReindex<
     let mut new_index = alloc_or_default::<u32, _>(alloc, length);
     let mut next_index: u32;
     let mut tmp: <Alloc as Allocator<HistogramType>>::AllocatedMemory;
-    for i in 0usize..length {
-        new_index.slice_mut()[i] = kInvalidIndex;
-    }
+    new_index.slice_mut()[..length].fill(kInvalidIndex);
     next_index = 0u32;
-    for i in 0usize..length {
-        if new_index.slice()[(symbols[i] as usize)] == kInvalidIndex {
-            new_index.slice_mut()[(symbols[i] as usize)] = next_index;
+    for &symbol in symbols.iter().take(length) {
+        if new_index.slice()[symbol as usize] == kInvalidIndex {
+            new_index.slice_mut()[symbol as usize] = next_index;
             next_index = next_index.wrapping_add(1);
         }
     }
@@ -340,9 +338,7 @@ pub fn BrotliHistogramReindex<
     {
         <Alloc as Allocator<u32>>::free_cell(alloc, new_index);
     }
-    for i in 0usize..next_index as usize {
-        out[i] = tmp.slice()[i].clone();
-    }
+    out[..next_index as usize].clone_from_slice(&tmp.slice()[..next_index as usize]);
     {
         <Alloc as Allocator<HistogramType>>::free_cell(alloc, tmp)
     }

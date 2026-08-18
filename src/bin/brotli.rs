@@ -1,4 +1,8 @@
-#![cfg_attr(feature = "benchmark", feature(test))]
+#![cfg_attr(all(feature = "benchmark", test), feature(test))]
+// The CLI includes upstream compatibility tests that build parameter sets incrementally.
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 
 extern crate alloc_no_stdlib;
 extern crate brotli_decompressor;
@@ -15,14 +19,20 @@ mod tests;
 mod util;
 mod validate;
 
-use core::cmp::{max, min};
 use core::ops;
 use std::env;
 use std::fs::File;
 use std::io::{self, Error, ErrorKind, Read, Seek, SeekFrom, Write};
 
+#[cfg(feature = "seccomp")]
+use alloc_no_stdlib::{
+    AllocatedStackMemory, StackAllocator, bzero, declare_stack_allocator_struct,
+    define_allocator_memory_pool, define_stack_allocator_traits, static_array,
+};
 use alloc_no_stdlib::{Allocator, SliceWrapper, SliceWrapperMut};
 use simd_brotli::CustomRead;
+#[cfg(feature = "seccomp")]
+use simd_brotli::HuffmanCode;
 use simd_brotli::enc::backward_references::BrotliEncoderMode;
 use simd_brotli::enc::threading::{
     BrotliEncoderThreadError, CompressMulti, CompressionThreadResult, Owned, SendAlloc,
@@ -211,7 +221,7 @@ where
     )
 }
 #[cfg(feature = "seccomp")]
-extern "C" {
+unsafe extern "C" {
     fn calloc(n_elem: usize, el_size: usize) -> *mut u8;
     fn free(ptr: *mut u8);
     fn syscall(value: i32) -> i32;
@@ -257,8 +267,8 @@ where
     match simd_brotli::BrotliDecompressCustomIo(
         &mut IoReaderWrapper::<InputType>(r),
         &mut IoWriterWrapper::<OutputType>(w),
-        &mut alloc_u8.alloc_cell(buffer_size).slice_mut(),
-        &mut alloc_u8.alloc_cell(buffer_size).slice_mut(),
+        alloc_u8.alloc_cell(buffer_size).slice_mut(),
+        alloc_u8.alloc_cell(buffer_size).slice_mut(),
         alloc_u8,
         alloc_u32,
         alloc_hc,
@@ -376,7 +386,7 @@ pub fn compress_multi<InputType: Read, OutputType: Write>(
                 Ok(size)
             }
         }
-        Err(err) => Err(io::Error::new(ErrorKind::Other, format!("{:?}", err))),
+        Err(err) => Err(io::Error::other(format!("{:?}", err))),
     }
 }
 
@@ -583,7 +593,7 @@ fn main() {
                 continue;
             }
             if argument.starts_with("-customdictionary=") && !double_dash {
-                for item in argument.splitn(2, |c| c == '=').skip(1) {
+                for item in argument.splitn(2, '=').skip(1) {
                     custom_dictionary = read_custom_dictionary(item);
                 }
                 continue;
@@ -693,17 +703,12 @@ fn main() {
                 continue;
             }
             if argument.starts_with("-j") && !double_dash {
-                num_threads = min(
-                    max(
-                        1,
-                        argument
-                            .trim_matches('-')
-                            .trim_matches('j')
-                            .parse::<i32>()
-                            .unwrap() as usize,
-                    ),
-                    MAX_THREADS,
-                );
+                num_threads = (argument
+                    .trim_matches('-')
+                    .trim_matches('j')
+                    .parse::<i32>()
+                    .unwrap() as usize)
+                    .clamp(1, MAX_THREADS);
                 continue;
             }
             if argument.starts_with("-bytescore=") && !double_dash {
@@ -859,7 +864,7 @@ fn main() {
             println_stderr!("byte aligned streams only supported when catable or appendable!");
             return;
         }
-        if filenames[0] != "" {
+        if !filenames[0].is_empty() {
             let mut input = match File::open(Path::new(&filenames[0])) {
                 Err(why) => panic!("couldn't open {:}\n{:}", filenames[0], why),
                 Ok(file) => file,
@@ -1043,7 +1048,7 @@ fn main() {
                     &custom_dictionary[..],
                     num_threads,
                 ) {
-                    Ok(_) => return,
+                    Ok(_) => (),
                     Err(e) => panic!("Error {:?}", e),
                 }
             } else {
@@ -1053,7 +1058,7 @@ fn main() {
                     buffer_size,
                     custom_dictionary.into(),
                 ) {
-                    Ok(_) => return,
+                    Ok(_) => (),
                     Err(e) => panic!(
                         "Error: {:} during brotli decompress\nTo compress with Brotli, specify the -c flag.",
                         e

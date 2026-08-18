@@ -105,7 +105,7 @@ fn BuildAndStoreLiteralPrefixCode<AllocHT: alloc::Allocator<HuffmanTree>>(
     }
     BrotliBuildAndStoreHuffmanTreeFast(
         mht,
-        &mut histogram[..],
+        &histogram[..],
         histogram_total,
         8usize,
         depths,
@@ -162,8 +162,8 @@ fn EmitInsertLen(
             .wrapping_add(prefix)
             .wrapping_add(42);
         BrotliWriteBits(
-            depth[(inscode as usize)] as usize,
-            bits[(inscode as usize)] as (u64),
+            depth[inscode] as usize,
+            bits[inscode] as (u64),
             storage_ix,
             storage,
         );
@@ -175,7 +175,7 @@ fn EmitInsertLen(
         );
         {
             let _rhs = 1;
-            let _lhs = &mut histo[(inscode as usize)];
+            let _lhs = &mut histo[inscode];
             *_lhs = (*_lhs).wrapping_add(_rhs as u32);
         }
     } else if insertlen < 2114usize {
@@ -183,8 +183,8 @@ fn EmitInsertLen(
         let nbits: u32 = Log2FloorNonZero(tail as u64);
         let code: usize = nbits.wrapping_add(50) as usize;
         BrotliWriteBits(
-            depth[(code as usize)] as usize,
-            bits[(code as usize)] as (u64),
+            depth[code] as usize,
+            bits[code] as (u64),
             storage_ix,
             storage,
         );
@@ -196,7 +196,7 @@ fn EmitInsertLen(
         );
         {
             let _rhs = 1;
-            let _lhs = &mut histo[(code as usize)];
+            let _lhs = &mut histo[code];
             *_lhs = (*_lhs).wrapping_add(_rhs as u32);
         }
     } else {
@@ -219,10 +219,8 @@ fn ShouldUseUncompressedMode(delta: isize, insertlen: usize, literal_ratio: usiz
     let compressed = delta as usize;
     if compressed.wrapping_mul(50) > insertlen {
         false
-    } else if literal_ratio > 980 {
-        true
     } else {
-        false
+        literal_ratio > 980
     }
 }
 fn RewindBitPosition(new_storage_ix: usize, storage_ix: &mut usize, storage: &mut [u8]) {
@@ -296,8 +294,7 @@ fn EmitLiterals(
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
-    for j in 0usize..len {
-        let lit: u8 = input[j];
+    for &lit in input.iter().take(len) {
         BrotliWriteBits(
             depth[(lit as usize)] as usize,
             bits[(lit as usize)] as (u64),
@@ -362,8 +359,8 @@ fn EmitCopyLenLastDistance(
         let prefix: usize = tail >> nbits;
         let code: usize = ((nbits << 1) as usize).wrapping_add(prefix).wrapping_add(4);
         BrotliWriteBits(
-            depth[(code as usize)] as usize,
-            bits[(code as usize)] as (u64),
+            depth[code] as usize,
+            bits[code] as (u64),
             storage_ix,
             storage,
         );
@@ -375,7 +372,7 @@ fn EmitCopyLenLastDistance(
         );
         {
             let _rhs = 1;
-            let _lhs = &mut histo[(code as usize)];
+            let _lhs = &mut histo[code];
             *_lhs = (*_lhs).wrapping_add(_rhs as u32);
         }
     } else if copylen < 136usize {
@@ -404,8 +401,8 @@ fn EmitCopyLenLastDistance(
         let nbits: u32 = Log2FloorNonZero(tail as u64);
         let code: usize = nbits.wrapping_add(28) as usize;
         BrotliWriteBits(
-            depth[(code as usize)] as usize,
-            bits[(code as usize)] as (u64),
+            depth[code] as usize,
+            bits[code] as (u64),
             storage_ix,
             storage,
         );
@@ -418,7 +415,7 @@ fn EmitCopyLenLastDistance(
         BrotliWriteBits(depth[64] as usize, bits[64] as (u64), storage_ix, storage);
         {
             let _rhs = 1;
-            let _lhs = &mut histo[(code as usize)];
+            let _lhs = &mut histo[code];
             *_lhs = (*_lhs).wrapping_add(_rhs as u32);
         }
         {
@@ -481,8 +478,8 @@ fn EmitCopyLen(
             .wrapping_add(prefix)
             .wrapping_add(20);
         BrotliWriteBits(
-            depth[(code as usize)] as usize,
-            bits[(code as usize)] as (u64),
+            depth[code] as usize,
+            bits[code] as (u64),
             storage_ix,
             storage,
         );
@@ -494,7 +491,7 @@ fn EmitCopyLen(
         );
         {
             let _rhs = 1;
-            let _lhs = &mut histo[(code as usize)];
+            let _lhs = &mut histo[code];
             *_lhs = (*_lhs).wrapping_add(_rhs as u32);
         }
     } else if copylen < 2118usize {
@@ -502,8 +499,8 @@ fn EmitCopyLen(
         let nbits: u32 = Log2FloorNonZero(tail as u64);
         let code: usize = nbits.wrapping_add(28) as usize;
         BrotliWriteBits(
-            depth[(code as usize)] as usize,
-            bits[(code as usize)] as (u64),
+            depth[code] as usize,
+            bits[code] as (u64),
             storage_ix,
             storage,
         );
@@ -515,7 +512,7 @@ fn EmitCopyLen(
         );
         {
             let _rhs = 1;
-            let _lhs = &mut histo[(code as usize)];
+            let _lhs = &mut histo[code];
             *_lhs = (*_lhs).wrapping_add(_rhs as u32);
         }
     } else {
@@ -613,7 +610,7 @@ fn BuildAndStoreCommandPrefixCode(
     memcpy(bits, (40usize), cmd_bits, 24usize, 8usize);
     memcpy(bits, (48usize), cmd_bits, 40usize, 8usize);
     memcpy(bits, (56usize), cmd_bits, 56usize, 8usize);
-    BrotliConvertBitDepthsToSymbols(&mut depth[64..], 64usize, &mut bits[64..]);
+    BrotliConvertBitDepthsToSymbols(&depth[64..], 64usize, &mut bits[64..]);
     {
         cmd_depth[..64].fill(0);
         memcpy(&mut cmd_depth[..], 0, depth, 0, 8usize);
@@ -640,7 +637,7 @@ fn BuildAndStoreCommandPrefixCode(
         );
     }
     BrotliStoreHuffmanTreeWithScratch(
-        &mut depth[64..],
+        &depth[64..],
         64usize,
         tree,
         huffman_tree,
@@ -820,8 +817,8 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     EmitLiterals(
                         &input_ptr[next_emit..],
                         insert,
-                        &mut lit_depth[..],
-                        &mut lit_bits[..],
+                        &lit_depth[..],
+                        &lit_bits[..],
                         storage_ix,
                         storage,
                     );
@@ -951,7 +948,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
             block_size = min(input_size, kMergeBlockSize);
             if input_size > 0
                 && (total_block_size.wrapping_add(block_size) <= (1i32 << 20) as usize)
-                && ShouldMergeBlock(&input_ptr[input_index..], block_size, &mut lit_depth[..])
+                && ShouldMergeBlock(&input_ptr[input_index..], block_size, &lit_depth[..])
             {
                 total_block_size = total_block_size.wrapping_add(block_size);
                 UpdateBits(
@@ -977,8 +974,8 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     EmitLiterals(
                         &input_ptr[next_emit..],
                         insert,
-                        &mut lit_depth[..],
-                        &mut lit_bits[..],
+                        &lit_depth[..],
+                        &lit_bits[..],
                         storage_ix,
                         storage,
                     );
@@ -1006,8 +1003,8 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     EmitLiterals(
                         &input_ptr[next_emit..],
                         insert,
-                        &mut lit_depth[..],
-                        &mut lit_bits[..],
+                        &lit_depth[..],
+                        &lit_bits[..],
                         storage_ix,
                         storage,
                     );
@@ -1035,7 +1032,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                 storage,
             );
             BuildAndStoreCommandPrefixCode(
-                &mut cmd_histo[..],
+                &cmd_histo[..],
                 cmd_depth,
                 cmd_bits,
                 command_prefix_scratch,
@@ -1049,7 +1046,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
         cmd_code[0] = 0;
         *cmd_code_numbits = 0;
         BuildAndStoreCommandPrefixCode(
-            &mut cmd_histo[..],
+            &cmd_histo[..],
             cmd_depth,
             cmd_bits,
             command_prefix_scratch,

@@ -108,7 +108,7 @@ fn compute_new_weight(
     let wi = weights[index] as f64 / ((1i64 << LOG2_SCALE) as f64);
     let mut wi_new = wi + (1.0 - p1) * (s * n1i - s1 * ni) / (s0 * s1);
     let eps = 0.00001f64;
-    if !(wi_new > eps) {
+    if wi_new.partial_cmp(&eps) != Some(core::cmp::Ordering::Greater) {
         wi_new = eps;
     }
     (wi_new * ((1i64 << LOG2_SCALE) as f64)) as i32

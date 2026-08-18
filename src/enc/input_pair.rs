@@ -143,4 +143,7 @@ impl<'a> InputPair<'a> {
     pub fn len(&self) -> usize {
         self.0.len() + self.1.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.0.len() == 0 && self.1.len() == 0
+    }
 }

@@ -1432,6 +1432,10 @@ impl DictWord {
         self.l
     }
     #[inline(always)]
+    pub fn is_empty(self) -> bool {
+        self.l == 0
+    }
+    #[inline(always)]
     pub fn transform(self) -> u8 {
         self.t
     }

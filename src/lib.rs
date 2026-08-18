@@ -2,9 +2,16 @@
 #![allow(non_snake_case)]
 #![allow(unused_parens)]
 #![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
-#![cfg_attr(feature = "benchmark", feature(test))]
+// This encoder is a close port of Brotli's C implementation. These patterns keep the
+// implementation and its public compatibility surface aligned with upstream.
+#![allow(clippy::approx_constant)]
+#![allow(clippy::multiple_bound_locations)]
+#![allow(clippy::result_unit_err)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::upper_case_acronyms)]
+#![cfg_attr(all(feature = "benchmark", test), feature(test))]
 #![cfg_attr(
     feature = "no-stdlib-ffi-binding",
     cfg_attr(not(feature = "std"), feature(lang_items))

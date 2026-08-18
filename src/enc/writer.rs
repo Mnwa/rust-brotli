@@ -1,4 +1,6 @@
-use crate::alloc::{Allocator, SliceWrapperMut};
+#[cfg(feature = "std")]
+use crate::alloc::Allocator;
+use crate::alloc::SliceWrapperMut;
 #[cfg(feature = "std")]
 use std::io;
 #[cfg(feature = "std")]
@@ -10,6 +12,7 @@ use brotli_decompressor::CustomWrite;
 #[cfg(feature = "std")]
 pub use brotli_decompressor::{IntoIoWriter, IoWriterWrapper};
 
+#[cfg(feature = "std")]
 use super::backward_references::BrotliEncoderParams;
 use super::combined_alloc::BrotliAlloc;
 use super::encode::{
@@ -17,6 +20,7 @@ use super::encode::{
     BrotliEncoderStateStruct,
 };
 use super::interface;
+#[cfg(feature = "std")]
 use crate::enc::combined_alloc::allocate;
 
 #[cfg(feature = "std")]
@@ -221,22 +225,20 @@ pub fn write_all<ErrType, W: CustomWrite<ErrType>, ErrMaker: FnMut() -> Option<E
     mut error_to_return_if_zero_bytes_written: ErrMaker,
 ) -> Result<(), ErrType> {
     while !buf.is_empty() {
-        match writer.write(buf) {
-            Ok(bytes_written) => {
-                if bytes_written != 0 {
-                    buf = &buf[bytes_written..]
-                } else {
-                    match error_to_return_if_zero_bytes_written() {
-                        Some(err) => {
-                            return Err(err);
-                        }
-                        _ => {
-                            return Ok(());
-                        }
+        {
+            let bytes_written = writer.write(buf)?;
+            if bytes_written != 0 {
+                buf = &buf[bytes_written..]
+            } else {
+                match error_to_return_if_zero_bytes_written() {
+                    Some(err) => {
+                        return Err(err);
+                    }
+                    _ => {
+                        return Ok(());
                     }
                 }
             }
-            Err(e) => return Err(e),
         }
     }
     Ok(())
@@ -330,10 +332,7 @@ impl<ErrType, W: CustomWrite<ErrType>, BufferType: SliceWrapperMut<u8>, Alloc: B
         self.output.as_mut().unwrap()
     }
     pub fn into_inner(mut self) -> W {
-        match self.flush_or_close(BrotliEncoderOperation::BROTLI_OPERATION_FINISH) {
-            Ok(_) => {}
-            Err(_) => {}
-        }
+        let _ = self.flush_or_close(BrotliEncoderOperation::BROTLI_OPERATION_FINISH);
         self.output.take().unwrap()
     }
 }
@@ -342,11 +341,9 @@ impl<ErrType, W: CustomWrite<ErrType>, BufferType: SliceWrapperMut<u8>, Alloc: B
     for CompressorWriterCustomIo<ErrType, W, BufferType, Alloc>
 {
     fn drop(&mut self) {
-        if self.output.is_some() {
-            match self.flush_or_close(BrotliEncoderOperation::BROTLI_OPERATION_FINISH) {
-                Ok(_) => {}
-                Err(_) => {}
-            }
+        if self.output.is_some()
+            && let Ok(_) = self.flush_or_close(BrotliEncoderOperation::BROTLI_OPERATION_FINISH)
+        {
         }
         BrotliEncoderDestroyInstance(&mut self.state);
     }

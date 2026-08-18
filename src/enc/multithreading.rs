@@ -46,13 +46,13 @@ impl<U: Send + 'static> OwnedRetriever<U> for MultiThreadedOwnedRetriever<U> {
     fn view<T, F: FnOnce(&U) -> T>(&self, f: F) -> Result<T, PoisonedThreadError> {
         match self.0.read() {
             Ok(u) => Ok(f(&*u)),
-            Err(_) => Err(PoisonedThreadError::default()),
+            Err(_) => Err(()),
         }
     }
     fn unwrap(self) -> Result<U, PoisonedThreadError> {
         match self.0.into_inner() {
             Ok(u) => Ok(u),
-            Err(_) => Err(PoisonedThreadError::default()),
+            Err(_) => Err(()),
         }
     }
 }

@@ -371,7 +371,7 @@ impl BroCatli {
                 }
                 bytes_so_far >>= window_offset; // mask out the window size
                 bytes_so_far &= (1u64 << (varlen_offset - window_offset)) - 1;
-                let var_len_bytes = (((varlen_offset - window_offset) + 7) / 8);
+                let var_len_bytes = (varlen_offset - window_offset).div_ceil(8);
                 for byte_index in 0..var_len_bytes {
                     let cur_byte = (bytes_so_far >> (byte_index * 8));
                     realigned_header[byte_index] |=
@@ -381,18 +381,20 @@ impl BroCatli {
                         (cur_byte >> (8 - self.last_byte_bit_offset)) as u8;
                 }
                 let whole_byte_destination =
-                    ((usize::from(self.last_byte_bit_offset) + varlen_offset - window_offset) + 7)
-                        / 8;
-                let whole_byte_source = (varlen_offset + 7) / 8;
+                    (usize::from(self.last_byte_bit_offset) + varlen_offset - window_offset)
+                        .div_ceil(8);
+                let whole_byte_source = varlen_offset.div_ceil(8);
                 if whole_byte_source > usize::from(new_stream_pending.num_bytes_read) {
                     return BroCatliResult::BrotliFileNotCraftedForConcatenation;
                 }
                 let num_whole_bytes_to_copy =
                     usize::from(new_stream_pending.num_bytes_read) - whole_byte_source;
-                for aligned_index in 0..num_whole_bytes_to_copy {
-                    realigned_header[whole_byte_destination + aligned_index] =
-                        new_stream_pending.bytes_so_far[whole_byte_source + aligned_index];
-                }
+                realigned_header
+                    [whole_byte_destination..whole_byte_destination + num_whole_bytes_to_copy]
+                    .copy_from_slice(
+                        &new_stream_pending.bytes_so_far
+                            [whole_byte_source..whole_byte_source + num_whole_bytes_to_copy],
+                    );
                 out_bytes[*out_offset] = realigned_header[0];
                 self.any_bytes_emitted = true;
                 *out_offset += 1;
@@ -431,7 +433,7 @@ impl BroCatli {
             self.any_bytes_emitted = true;
         }
         new_stream_pending.num_bytes_written =
-            Some((new_stream_pending.num_bytes_written.unwrap() + to_copy as u8));
+            Some(new_stream_pending.num_bytes_written.unwrap() + to_copy as u8);
         if new_stream_pending.num_bytes_written.unwrap() != new_stream_pending.num_bytes_read {
             self.new_stream_pending = Some(new_stream_pending);
             return BroCatliResult::NeedsMoreOutput;
@@ -744,7 +746,7 @@ mod test {
     }
     #[test]
     fn test_cat_empty_stream() {
-        let empty_catable = [b';'];
+        let empty_catable = *b";";
         let mut bcat = super::BroCatli::default();
         let mut in_offset = 0usize;
         let mut out_bytes = [0u8; 32];
@@ -769,11 +771,11 @@ mod test {
         res = bcat.finish(&mut out_bytes[..], &mut out_offset);
         assert_eq!(res, super::BroCatliResult::Success);
         assert_ne!(out_offset, 0);
-        assert_eq!(&out_bytes[..out_offset], &[b';']);
+        assert_eq!(&out_bytes[..out_offset], b";");
     }
     #[test]
     fn test_cat_truncated_metadata_header_fails() {
-        let empty_catable = [b';'];
+        let empty_catable = *b";";
         let mut bcat = super::BroCatli::new_with_window_size(22);
         let mut in_offset = 0usize;
         let mut out_bytes = [0u8; 32];

@@ -347,7 +347,7 @@ fn test_concat() {
     params0.large_window = true;
 
     let mut options = [params0, params1, params2, params3, params4, params5];
-    for option in options.iter_mut().skip(3) {
+    if let Some(option) = options.get_mut(3) {
         let mut ufiles = [
             UnlimitedBuffer::new(&[]),
             UnlimitedBuffer::new(&[]),

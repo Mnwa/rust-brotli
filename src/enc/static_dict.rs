@@ -196,8 +196,8 @@ fn wide_common_prefix<S: Simd>(simd: S, s1: &[u8], s2: &[u8], limit: usize) -> u
     let (s2_ch, s2_tail) = s2.as_chunks::<32>();
 
     for equal in s1_ch
-        .into_iter()
-        .zip(s2_ch.into_iter())
+        .iter()
+        .zip(s2_ch)
         .map(|(s1, s2)| {
             (
                 u8x32::load_array_ref(simd, s1),
@@ -211,7 +211,7 @@ fn wide_common_prefix<S: Simd>(simd: S, s1: &[u8], s2: &[u8], limit: usize) -> u
         }
         matched += 32;
     }
-    matched + scalar_common_prefix(&s1_tail, &s2_tail, limit - matched)
+    matched + scalar_common_prefix(s1_tail, s2_tail, limit - matched)
 }
 
 /// Common prefix length of fewer than 32 remaining bytes: 64-bit steps, then bytes.
@@ -502,10 +502,10 @@ pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
                         matches,
                     );
                     if l.wrapping_add(2) < max_length
-                        && (data[(l.wrapping_sub(1) as usize)] as i32 == b'i' as i32)
-                        && (data[(l as usize)] as i32 == b'n' as i32)
-                        && (data[(l.wrapping_add(1) as usize)] as i32 == b'g' as i32)
-                        && (data[(l.wrapping_add(2) as usize)] as i32 == b' ' as i32)
+                        && (data[l.wrapping_sub(1)] as i32 == b'i' as i32)
+                        && (data[l] as i32 == b'n' as i32)
+                        && (data[l.wrapping_add(1)] as i32 == b'g' as i32)
+                        && (data[l.wrapping_add(2)] as i32 == b' ' as i32)
                     {
                         //eprint!("Cdding match {} {} {}\n", w.len(), w.transform(), w.idx());
                         AddMatch(
@@ -538,7 +538,7 @@ pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
                 if matchlen < l || l.wrapping_add(6) >= max_length {
                     continue;
                 }
-                let s: &[u8] = data.split_at(l as usize).1;
+                let s: &[u8] = data.split_at(l).1;
                 if s[0] as i32 == b' ' as i32 {
                     //eprint!("Edding match {} {} {} {}\n", w.len(), w.transform(), w.idx(), len);
                     AddMatch(id.wrapping_add(n), l.wrapping_add(1), l, matches);
@@ -991,7 +991,7 @@ pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
                 if l.wrapping_add(1) >= max_length {
                     continue;
                 }
-                let s: &[u8] = data.split_at(l as usize).1;
+                let s: &[u8] = data.split_at(l).1;
                 if s[0] as i32 == b' ' as i32 {
                     //eprint!("AWdding match {} {} {} {}\n", w.len(), w.transform(), w.idx(), 666);
                     AddMatch(
@@ -1146,7 +1146,7 @@ pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
                 if l.wrapping_add(2) >= max_length {
                     continue;
                 }
-                let s: &[u8] = data.split_at(l.wrapping_add(1) as usize).1;
+                let s: &[u8] = data.split_at(l.wrapping_add(1)).1;
                 if s[0] as i32 == b' ' as i32 {
                     //eprint!("BIdding match {} {} {} {}\n", w.len(), w.transform(), w.idx(), 666);
                     AddMatch(
@@ -1358,7 +1358,7 @@ pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
                     );
                     has_found_match = 1i32;
                 } else if l.wrapping_add(2) < max_length
-                    && (data[(l.wrapping_add(2) as usize)] as i32 == b' ' as i32)
+                    && (data[l.wrapping_add(2)] as i32 == b' ' as i32)
                 {
                     let t: usize = (if data[0] as i32 == b'e' as i32 {
                         18i32
@@ -1427,7 +1427,7 @@ pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
                 );
                 has_found_match = 1i32;
                 if l.wrapping_add(5) < max_length {
-                    let s: &[u8] = data.split_at(l.wrapping_add(5) as usize).1;
+                    let s: &[u8] = data.split_at(l.wrapping_add(5)).1;
                     if data[0] as i32 == b' ' as i32
                         && l.wrapping_add(8) < max_length
                         && (s[0] as i32 == b' ' as i32)

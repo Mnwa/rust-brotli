@@ -17,7 +17,7 @@ static ALICE: &[u8] = include_bytes!("../../testdata/alice29.txt");
 
 #[test]
 fn test_custom_dict_minimal() {
-    let mut raw = UnlimitedBuffer::new("\012345656789abcde".as_bytes());
+    let mut raw = UnlimitedBuffer::new("\x0012345656789abcde".as_bytes());
     let mut params = BrotliEncoderParams::default();
     params.quality = 10;
     let mut br = UnlimitedBuffer::new(&[]);
@@ -25,7 +25,7 @@ fn test_custom_dict_minimal() {
     let dict = "123456789abcde".as_bytes();
     super::compress(&mut raw, &mut br, 4096, &params, dict, 1).unwrap();
     raw.reset_read();
-    eprintln!("Compressed: {:?}", &br);
+    eprintln!("Compressed: {:?}", br);
     let mut vec = Vec::<u8>::new();
     vec.extend(dict);
     super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)).unwrap();
@@ -51,11 +51,11 @@ fn test_custom_dict_large() {
             counter -= index / 11;
         }
     }
-    eprintln!("Uncompressed: {:?}", &data_source);
+    eprintln!("Uncompressed: {:?}", data_source);
     let mut raw = UnlimitedBuffer::new(&data_source);
     super::compress(&mut raw, &mut br, 4096, &params, &dict, 1).unwrap();
     raw.reset_read();
-    eprintln!("Compressed: {:?}", &br);
+    eprintln!("Compressed: {:?}", br);
 
     // Write debug files to temp directory (works on all platforms)
     if let Ok(temp_dir) = std::env::var("TMPDIR").or_else(|_| std::env::var("TEMP")) {
@@ -112,7 +112,7 @@ fn test_custom_dict_medium() {
     let mut raw = UnlimitedBuffer::new(&new_data_source);
     super::compress(&mut raw, &mut br, 4096, &params, &dict, 1).unwrap();
     raw.reset_read();
-    eprintln!("Compressed: {:?}", &br);
+    eprintln!("Compressed: {:?}", br);
     let mut vec = Vec::<u8>::new();
     vec.extend(dict);
     super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)).unwrap();
@@ -130,7 +130,7 @@ fn test_custom_dict_alice() {
     super::compress(&mut raw, &mut br, 4096, &params, dict, 1).unwrap();
     raw.reset_read();
     eprintln!("Dict {:?}", dict);
-    eprintln!("Compressed: {:?}", &br);
+    eprintln!("Compressed: {:?}", br);
     let mut vec = Vec::<u8>::new();
     vec.extend(dict);
     super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)).unwrap();
@@ -162,7 +162,7 @@ fn test_custom_dict_alice_9_5() {
     super::compress(&mut raw, &mut br, 4096, &params, dict, 1).unwrap();
     raw.reset_read();
     eprintln!("Dict {:?}", dict);
-    eprintln!("Compressed: {:?}", &br);
+    eprintln!("Compressed: {:?}", br);
     let mut vec = Vec::<u8>::new();
     vec.extend(dict);
     super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)).unwrap();
@@ -184,9 +184,8 @@ fn test_custom_wrong_dict_fails() {
     raw.reset_read();
     let mut vec = Vec::<u8>::new();
     vec.extend(&dict[1..]); // slightly offset dictionary to be wrong, and ensure the dict was being used above
-    match super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)) {
-        Ok(_) => panic!("Decompression should have failed"),
-        Err(_) => {}
+    if super::decompress(&mut br, &mut rt, 4096, Rebox::from(vec)).is_ok() {
+        panic!("Decompression should have failed")
     }
     if rt.data() == raw.data() {
         panic!("they should be unequal");

@@ -411,12 +411,24 @@ impl<SliceType: SliceWrapper<u8> + Default> Default for FeatureFlagSliceType<Sli
     }
 }
 
+#[cfg(not(feature = "external-literal-probability"))]
+impl<SliceType: SliceWrapper<u8>> Clone for FeatureFlagSliceType<SliceType> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[cfg(not(feature = "external-literal-probability"))]
+impl<SliceType: SliceWrapper<u8>> Copy for FeatureFlagSliceType<SliceType> {}
+
+#[cfg(feature = "external-literal-probability")]
 impl<SliceType: SliceWrapper<u8> + Clone> Clone for FeatureFlagSliceType<SliceType> {
     #[inline(always)]
     fn clone(&self) -> Self {
-        FeatureFlagSliceType::<SliceType>(self.0)
+        FeatureFlagSliceType::<SliceType>(self.0.clone())
     }
 }
+#[cfg(feature = "external-literal-probability")]
 impl<SliceType: SliceWrapper<u8> + Clone + Copy> Copy for FeatureFlagSliceType<SliceType> {}
 
 #[derive(Debug)]
@@ -454,6 +466,7 @@ impl<SliceType: SliceWrapper<u8> + Default> Nop<LiteralCommand<SliceType>>
 }
 impl<SliceType: SliceWrapper<u8> + Clone> Clone for LiteralCommand<SliceType> {
     #[inline(always)]
+    #[allow(clippy::clone_on_copy)] // `prob` is not necessarily Copy when its feature is enabled.
     fn clone(&self) -> LiteralCommand<SliceType> {
         LiteralCommand::<SliceType> {
             data: self.data.clone(),
@@ -622,6 +635,9 @@ impl SliceOffset {
     }
     pub fn len(&self) -> usize {
         self.1 as usize
+    }
+    pub fn is_empty(&self) -> bool {
+        self.1 == 0
     }
     pub fn len32(&self) -> u32 {
         self.1

@@ -82,10 +82,27 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
 - On `testdata/alice29.txt`, Apple Silicon release builds improved quality-0 throughput by roughly
   3%; quality-1 remained effectively unchanged within corpus and measurement variance.
 
+### Lint and feature-matrix maintenance
+
+- The crate, binaries, examples and tests are clean under
+  `cargo clippy --all-targets -- -D warnings`. Mechanical C-port patterns that are part of the
+  encoder's structure remain documented with narrowly scoped lint policy, while redundant
+  allowances and dead constant branches were removed.
+- Float comparisons now use `partial_cmp` explicitly, preserving the previous behavior for NaN
+  values. Index-only range loops now use bounded iterators, enumeration and zipped slices while
+  retaining indices where Brotli's ordering or parallel tables require them. Slice copies,
+  optional-dictionary handling, parameter construction and public `len` helpers were also made
+  idiomatic; `InputPair`, `SliceOffset` and `DictWord` now provide matching `is_empty` methods.
+- Feature-gated imports and clone implementations were corrected for `no_std`,
+  `external-literal-probability`, FFI panic handling and `float64`. The `seccomp` path now imports
+  its allocator macros and uses an edition-2024-compatible unsafe extern block.
+- Nightly benchmarks are compiled only for test/benchmark targets and use the current
+  `FindLongestMatch` ring-buffer-break argument and range-store method names.
+
 ### Verification
 
-Formatting checks and the full test suite pass, as do the default, `float64`,
-`no-default-features + float64`, and `float64 + hotpath` builds.
+Formatting checks and the full test suite pass, as do strict Clippy checks for the default,
+`no_std`, FFI, `float64`, complete stable-feature and nightly benchmark configurations.
 `cargo-semver-checks --default-features` identified the intentional `Union1` enum-to-struct change
 as a breaking change under a patch release; it accepts the resulting 10.0.0 major version.
 Quality-6 and quality-11 output is byte-identical to the pre-change implementation across six

@@ -1,6 +1,5 @@
 use core::marker::PhantomData;
 use core::mem;
-use std;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::thread::JoinHandle;
@@ -22,9 +21,7 @@ struct HexSlice<'a>(&'a [u8]);
 impl<'a> fmt::Display for HexSlice<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for byte in self.0 {
-            if let Err(e) = write!(f, "{:02X}", byte) {
-                return Err(e);
-            }
+            write!(f, "{:02X}", byte)?;
         }
         Ok(())
     }
@@ -215,16 +212,16 @@ impl<U: Send + 'static> OwnedRetriever<U> for MTOwnedRetriever<U> {
     fn view<T, F: FnOnce(&U) -> T>(&self, f: F) -> Result<T, PoisonedThreadError> {
         match self.0.read() {
             Ok(u) => Ok(f(&*u)),
-            Err(_) => Err(PoisonedThreadError::default()),
+            Err(_) => Err(()),
         }
     }
     fn unwrap(self) -> Result<U, PoisonedThreadError> {
         match std::sync::Arc::try_unwrap(self.0) {
             Ok(rwlock) => match rwlock.into_inner() {
                 Ok(u) => Ok(u),
-                Err(_) => Err(PoisonedThreadError::default()),
+                Err(_) => Err(()),
             },
-            Err(_) => Err(PoisonedThreadError::default()),
+            Err(_) => Err(()),
         }
     }
 }

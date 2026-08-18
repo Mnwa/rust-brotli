@@ -1,3 +1,4 @@
+#[cfg(all(test, feature = "benchmark"))]
 mod benchmark;
 pub mod hash_to_binary_tree;
 pub mod hq;
@@ -50,12 +51,13 @@ fn fix_unbroken_len(
     _cur_ix_masked: usize,
     ring_buffer_break: Option<core::num::NonZeroUsize>,
 ) -> usize {
-    if let Some(br) = ring_buffer_break {
-        if prev_ix < usize::from(br) && prev_ix + unbroken_len > usize::from(br) {
-            return usize::from(br) - prev_ix;
-        }
+    if let Some(br) = ring_buffer_break
+        && prev_ix < usize::from(br)
+        && prev_ix + unbroken_len > usize::from(br)
+    {
+        return usize::from(br) - prev_ix;
     }
-    return unbroken_len;
+    unbroken_len
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrotliHasherParams {
@@ -372,7 +374,7 @@ impl<T: SliceWrapperMut<u32> + SliceWrapper<u32> + BasicHashComputer> AnyHasher 
         self.buckets_.HashBytes(data) as usize
     }
     fn Store(&mut self, data: &[u8], mask: usize, ix: usize) {
-        let (_, data_window) = data.split_at((ix & mask));
+        let (_, data_window) = data.split_at(ix & mask);
         let key: u32 = self.HashBytes(data_window) as u32;
         let off: u32 = (ix >> 3).wrapping_rem(self.buckets_.BUCKET_SWEEP() as usize) as u32;
         self.buckets_.slice_mut()[key.wrapping_add(off) as usize] = ix as u32;
@@ -512,10 +514,13 @@ impl<T: SliceWrapperMut<u32> + SliceWrapper<u32> + BasicHashComputer> AnyHasher 
                 }
             }
         }
-        if dictionary.is_some() && self.buckets_.USE_DICTIONARY() != 0 && !is_match_found {
+        if self.buckets_.USE_DICTIONARY() != 0
+            && !is_match_found
+            && let Some(dictionary) = dictionary
+        {
             is_match_found = SearchInStaticDictionary(
                 level,
-                dictionary.unwrap(),
+                dictionary,
                 dictionary_hash,
                 self,
                 &data[cur_ix_masked..],
@@ -550,12 +555,12 @@ impl<AllocU32: alloc::Allocator<u32>> BasicHashComputer for H2Sub<AllocU32> {
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapperMut<u32> for H2Sub<AllocU32> {
     fn slice_mut(&mut self) -> &mut [u32] {
-        return self.buckets_.slice_mut();
+        self.buckets_.slice_mut()
     }
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapper<u32> for H2Sub<AllocU32> {
     fn slice(&self) -> &[u32] {
-        return self.buckets_.slice();
+        self.buckets_.slice()
     }
 }
 pub struct H3Sub<AllocU32: alloc::Allocator<u32>> {
@@ -563,12 +568,12 @@ pub struct H3Sub<AllocU32: alloc::Allocator<u32>> {
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapperMut<u32> for H3Sub<AllocU32> {
     fn slice_mut(&mut self) -> &mut [u32] {
-        return self.buckets_.slice_mut();
+        self.buckets_.slice_mut()
     }
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapper<u32> for H3Sub<AllocU32> {
     fn slice(&self) -> &[u32] {
-        return self.buckets_.slice();
+        self.buckets_.slice()
     }
 }
 impl<AllocU32: alloc::Allocator<u32>> BasicHashComputer for H3Sub<AllocU32> {
@@ -608,12 +613,12 @@ impl<AllocU32: alloc::Allocator<u32>> BasicHashComputer for H4Sub<AllocU32> {
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapperMut<u32> for H4Sub<AllocU32> {
     fn slice_mut(&mut self) -> &mut [u32] {
-        return self.buckets_.slice_mut();
+        self.buckets_.slice_mut()
     }
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapper<u32> for H4Sub<AllocU32> {
     fn slice(&self) -> &[u32] {
-        return self.buckets_.slice();
+        self.buckets_.slice()
     }
 }
 pub struct H54Sub<AllocU32: alloc::Allocator<u32>> {
@@ -638,12 +643,12 @@ impl<AllocU32: alloc::Allocator<u32>> BasicHashComputer for H54Sub<AllocU32> {
 
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapperMut<u32> for H54Sub<AllocU32> {
     fn slice_mut(&mut self) -> &mut [u32] {
-        return self.buckets_.slice_mut();
+        self.buckets_.slice_mut()
     }
 }
 impl<AllocU32: alloc::Allocator<u32>> SliceWrapper<u32> for H54Sub<AllocU32> {
     fn slice(&self) -> &[u32] {
-        return self.buckets_.slice();
+        self.buckets_.slice()
     }
 }
 pub const H9_BUCKET_BITS: usize = 15;
@@ -916,11 +921,11 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
             bucket[*self_num_key as usize & H9_BLOCK_MASK] = cur_ix as u32;
             *self_num_key = self_num_key.wrapping_add(1);
         }
-        if !is_match_found && dictionary.is_some() {
+        if !is_match_found && let Some(dictionary) = dictionary {
             let (_, cur_data) = data.split_at(cur_ix_masked);
             is_match_found = SearchInStaticDictionary(
                 level,
-                dictionary.unwrap(),
+                dictionary,
                 dictionary_hash,
                 self,
                 cur_data,
@@ -935,7 +940,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
     }
 
     fn Store(&mut self, data: &[u8], mask: usize, ix: usize) {
-        let (_, data_window) = data.split_at((ix & mask));
+        let (_, data_window) = data.split_at(ix & mask);
         let key: u32 = self.HashBytes(data_window) as u32;
         let self_num_key = &mut self.num_.slice_mut()[key as usize];
         let minor_ix: usize = (*self_num_key as usize & H9_BLOCK_MASK);
@@ -1206,7 +1211,7 @@ impl AdvHashSpecialization for H6Sub {
 
 fn BackwardReferencePenaltyUsingLastDistance(distance_short_code: usize) -> u64 {
     // FIXME?: double bitwise AND with the same value?
-    (39u64).wrapping_add((0x0001_ca10_u64 >> (distance_short_code & 0x0e) & 0x0e))
+    (39u64).wrapping_add(0x0001_ca10_u64 >> (distance_short_code & 0x0e) & 0x0e)
 }
 
 impl<
@@ -1374,7 +1379,7 @@ impl<
         ix_start
     }
 
-    #[cfg(feature = "benchmark")]
+    #[cfg(all(test, feature = "benchmark"))]
     fn BulkStoreRangeOptMemFetchLazyDupeUpdate(
         &mut self,
         data: &[u8],
@@ -1458,7 +1463,7 @@ impl<
         ix_start
     }
 
-    #[cfg(feature = "benchmark")]
+    #[cfg(all(test, feature = "benchmark"))]
     fn BulkStoreRangeOptRandomDupeUpdate(
         &mut self,
         data: &[u8],
@@ -1694,7 +1699,7 @@ impl<
         buckets[offset3] = (ix + 12) as u32;
     }
     fn Store(&mut self, data: &[u8], mask: usize, ix: usize) {
-        let (_, data_window) = data.split_at((ix & mask));
+        let (_, data_window) = data.split_at(ix & mask);
         let key: u32 = self.HashBytes(data_window) as u32;
         let minor_ix: usize =
             (self.num.slice()[(key as usize)] as u32 & self.specialization.block_mask()) as usize;
@@ -1758,8 +1763,12 @@ impl<
         out.len = 0usize;
         out.len_x_code = 0usize;
         let cur_data = data.split_at(cur_ix_masked).1;
-        for i in 0..self.GetHasherCommon.params.num_last_distances_to_check as usize {
-            let backward: usize = distance_cache[i] as usize;
+        for (i, &cached_distance) in distance_cache
+            .iter()
+            .enumerate()
+            .take(self.GetHasherCommon.params.num_last_distances_to_check as usize)
+        {
+            let backward: usize = cached_distance as usize;
             let mut prev_ix: usize = cur_ix.wrapping_sub(backward);
             if prev_ix >= cur_ix || backward > max_backward {
                 continue;
@@ -1849,11 +1858,11 @@ impl<
         bucket[(num_copy as u32 & self.specialization.block_mask()) as usize] = cur_ix as u32;
         *num_ref_mut = num_ref_mut.wrapping_add(1);
 
-        if !is_match_found && dictionary.is_some() {
+        if !is_match_found && let Some(dictionary) = dictionary {
             let (_, cur_data) = data.split_at(cur_ix_masked);
             is_match_found = SearchInStaticDictionary(
                 level,
-                dictionary.unwrap(),
+                dictionary,
                 dictionary_hash,
                 self,
                 cur_data,
@@ -2108,10 +2117,10 @@ impl<
         self.store(data, ring_buffer_mask, cur_ix);
 
         let mut found = out.score != min_score;
-        if !found && dictionary.is_some() {
+        if !found && let Some(dictionary) = dictionary {
             found = SearchInStaticDictionary(
                 level,
-                dictionary.unwrap(),
+                dictionary,
                 dictionary_hash,
                 self,
                 cur_data,
@@ -2436,7 +2445,9 @@ impl<
 }
 
 #[non_exhaustive]
+#[derive(Default)]
 pub enum UnionHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> {
+    #[default]
     Uninit,
     H2(BasicHasher<H2Sub<Alloc>>),
     H3(BasicHasher<H3Sub<Alloc>>),
@@ -2519,10 +2530,7 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
                 UnionHasher::H10(ref otherh) => *hasher == *otherh,
                 _ => false,
             },
-            UnionHasher::Uninit => match *other {
-                UnionHasher::Uninit => true,
-                _ => false,
-            },
+            UnionHasher::Uninit => matches!(*other, UnionHasher::Uninit),
         }
     }
 }
@@ -2686,78 +2694,70 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
     UnionHasher<Alloc>
 {
     pub fn free(&mut self, alloc: &mut Alloc) {
-        match self {
-            &mut UnionHasher::H2(ref mut hasher) => {
+        match *self {
+            UnionHasher::H2(ref mut hasher) => {
                 <Alloc as Allocator<u32>>::free_cell(
                     alloc,
                     core::mem::take(&mut hasher.buckets_.buckets_),
                 );
             }
-            &mut UnionHasher::H3(ref mut hasher) => {
+            UnionHasher::H3(ref mut hasher) => {
                 <Alloc as Allocator<u32>>::free_cell(
                     alloc,
                     core::mem::take(&mut hasher.buckets_.buckets_),
                 );
             }
-            &mut UnionHasher::H4(ref mut hasher) => {
+            UnionHasher::H4(ref mut hasher) => {
                 <Alloc as Allocator<u32>>::free_cell(
                     alloc,
                     core::mem::take(&mut hasher.buckets_.buckets_),
                 );
             }
-            &mut UnionHasher::H54(ref mut hasher) => {
+            UnionHasher::H54(ref mut hasher) => {
                 <Alloc as Allocator<u32>>::free_cell(
                     alloc,
                     core::mem::take(&mut hasher.buckets_.buckets_),
                 );
             }
-            &mut UnionHasher::H5q7(ref mut hasher) => {
+            UnionHasher::H5q7(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
-            &mut UnionHasher::H5q5(ref mut hasher) => {
+            UnionHasher::H5q5(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
-            &mut UnionHasher::H5(ref mut hasher) => {
+            UnionHasher::H5(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
-            &mut UnionHasher::H6(ref mut hasher) => {
+            UnionHasher::H6(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
-            &mut UnionHasher::H58(ref mut hasher) => {
+            UnionHasher::H58(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u8>>::free_cell(alloc, core::mem::take(&mut hasher.tags));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
-            &mut UnionHasher::H68(ref mut hasher) => {
+            UnionHasher::H68(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num));
                 <Alloc as Allocator<u8>>::free_cell(alloc, core::mem::take(&mut hasher.tags));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets));
             }
-            &mut UnionHasher::H40(ref mut hasher) => hasher.free(alloc),
-            &mut UnionHasher::H41(ref mut hasher) => hasher.free(alloc),
-            &mut UnionHasher::H42(ref mut hasher) => hasher.free(alloc),
-            &mut UnionHasher::H9(ref mut hasher) => {
+            UnionHasher::H40(ref mut hasher) => hasher.free(alloc),
+            UnionHasher::H41(ref mut hasher) => hasher.free(alloc),
+            UnionHasher::H42(ref mut hasher) => hasher.free(alloc),
+            UnionHasher::H9(ref mut hasher) => {
                 <Alloc as Allocator<u16>>::free_cell(alloc, core::mem::take(&mut hasher.num_));
                 <Alloc as Allocator<u32>>::free_cell(alloc, core::mem::take(&mut hasher.buckets_));
             }
-            &mut UnionHasher::H10(ref mut hasher) => {
+            UnionHasher::H10(ref mut hasher) => {
                 hasher.free(alloc);
             }
-            &mut UnionHasher::Uninit => {}
+            UnionHasher::Uninit => {}
         }
         *self = UnionHasher::<Alloc>::default();
-    }
-}
-
-impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>> Default
-    for UnionHasher<Alloc>
-{
-    fn default() -> Self {
-        UnionHasher::Uninit
     }
 }
 
@@ -2978,9 +2978,9 @@ pub fn BrotliCreateBackwardReferences<
     num_literals: &mut usize,
 ) {
     let level = detect_level();
-    match (hasher_union) {
-        &mut UnionHasher::Uninit => panic!("working with uninitialized hash map"),
-        &mut UnionHasher::H10(ref mut hasher) => {
+    match *(hasher_union) {
+        UnionHasher::Uninit => panic!("working with uninitialized hash map"),
+        UnionHasher::H10(ref mut hasher) => {
             if params.quality >= 11 {
                 super::backward_references_hq::BrotliCreateHqZopfliBackwardReferencesAtLevel(
                     level,
@@ -3027,7 +3027,7 @@ pub fn BrotliCreateBackwardReferences<
                 )
             }
         }
-        &mut UnionHasher::H2(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H2(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3048,7 +3048,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H3(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H3(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3069,7 +3069,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H4(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H4(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3090,7 +3090,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H5(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H5(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3111,7 +3111,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H5q7(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H5q7(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3132,7 +3132,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H5q5(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H5q5(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3153,7 +3153,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H6(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H6(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3174,7 +3174,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H40(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H40(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3195,7 +3195,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H41(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H41(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3216,7 +3216,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H42(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H42(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3237,7 +3237,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H58(ref mut hasher) => {
+        UnionHasher::H58(ref mut hasher) => {
             dispatch!(level, simd => {
                 let mut hasher = TaggedHasherSimd::new(simd, hasher);
                 CreateBackwardReferences(
@@ -3259,7 +3259,7 @@ pub fn BrotliCreateBackwardReferences<
                 )
             })
         }
-        &mut UnionHasher::H68(ref mut hasher) => {
+        UnionHasher::H68(ref mut hasher) => {
             dispatch!(level, simd => {
                 let mut hasher = TaggedHasherSimd::new(simd, hasher);
                 CreateBackwardReferences(
@@ -3281,7 +3281,7 @@ pub fn BrotliCreateBackwardReferences<
                 )
             })
         }
-        &mut UnionHasher::H9(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H9(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)
@@ -3302,7 +3302,7 @@ pub fn BrotliCreateBackwardReferences<
             num_commands,
             num_literals,
         ),
-        &mut UnionHasher::H54(ref mut hasher) => CreateBackwardReferences(
+        UnionHasher::H54(ref mut hasher) => CreateBackwardReferences(
             level,
             if params.use_dictionary {
                 Some(dictionary)

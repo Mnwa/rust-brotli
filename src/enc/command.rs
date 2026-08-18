@@ -191,7 +191,7 @@ impl Command {
                 .wrapping_sub(dist.num_direct_distance_codes)
                 .wrapping_sub(BROTLI_NUM_DISTANCE_SHORT_CODES)
                 & postfix_mask;
-            let offset = (2u32.wrapping_add((hcode & 1)) << nbits).wrapping_sub(4);
+            let offset = (2u32.wrapping_add(hcode & 1) << nbits).wrapping_sub(4);
             (offset.wrapping_add(extra) << dist.distance_postfix_bits)
                 .wrapping_add(lcode)
                 .wrapping_add(dist.num_direct_distance_codes)
@@ -255,8 +255,7 @@ pub fn RecomputeDistancePrefixes(
     if num_direct_distance_codes == 0u32 && (distance_postfix_bits == 0u32) {
         return;
     }
-    for i in 0usize..num_commands {
-        let cmd: &mut Command = &mut cmds[i];
+    for cmd in cmds.iter_mut().take(num_commands) {
         if cmd.copy_len() != 0 && cmd.cmd_prefix_ >= 128 {
             PrefixEncodeCopyDistance(
                 cmd.restore_distance_code(dist) as usize,
@@ -370,12 +369,13 @@ mod test {
             alphabet_size: 224,
             max_distance: 268435456,
         };
-        let mut cmd = super::Command::default();
-        cmd.insert_len_ = 63;
-        cmd.copy_len_ = 3;
-        cmd.dist_extra_ = 3;
-        cmd.cmd_prefix_ = 297;
-        cmd.dist_prefix_ = 2089;
+        let mut cmd = super::Command {
+            insert_len_: 63,
+            copy_len_: 3,
+            dist_extra_: 3,
+            cmd_prefix_: 297,
+            dist_prefix_: 2089,
+        };
 
         assert_eq!(cmd.distance_index_and_offset(&param), (0, 46));
         assert_eq!(

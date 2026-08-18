@@ -44,6 +44,7 @@ impl Union1 {
     }
 
     #[inline(always)]
+    #[allow(clippy::unnecessary_cast)] // Required when `UnionBits` is u64 under `float64`.
     pub fn as_next(self) -> u32 {
         self.0 as u32
     }
@@ -54,6 +55,7 @@ impl Union1 {
     }
 
     #[inline(always)]
+    #[allow(clippy::unnecessary_cast)] // Required when `UnionBits` is u64 under `float64`.
     pub fn as_shortcut(self) -> u32 {
         self.0 as u32
     }
@@ -126,7 +128,7 @@ impl<AllocU32: Allocator<u32>> Allocable<u32, AllocU32> for H10Buckets<AllocU32>
 
 impl<AllocU32: Allocator<u32>> PartialEq<H10Buckets<AllocU32>> for H10Buckets<AllocU32> {
     fn eq(&self, other: &H10Buckets<AllocU32>) -> bool {
-        return self.0.slice() == other.0.slice();
+        self.0.slice() == other.0.slice()
     }
 }
 

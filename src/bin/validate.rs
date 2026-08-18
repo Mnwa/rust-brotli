@@ -1,5 +1,3 @@
-#[cfg(feature = "validation")]
-use core;
 use std::io::{self, Error, ErrorKind, Read, Write};
 
 use alloc_no_stdlib::{Allocator, SliceWrapper};
@@ -100,8 +98,7 @@ fn make_sha_reader<InputType: Read>(r: &mut InputType) -> ShaReader<'_, InputTyp
 
 #[cfg(feature = "validation")]
 fn sha_ok<InputType: Read>(writer: &mut ShaWriter, reader: &mut ShaReader<InputType>) -> bool {
-    core::mem::replace(&mut writer.0, Checksum::default()).finalize()
-        == core::mem::replace(&mut reader.checksum, Checksum::default()).finalize()
+    core::mem::take(&mut writer.0).finalize() == core::mem::take(&mut reader.checksum).finalize()
 }
 #[cfg(feature = "validation")]
 #[derive(Default)]
@@ -121,7 +118,7 @@ fn make_sha_writer() -> ShaWriter {
     ShaWriter::default()
 }
 #[cfg(feature = "validation")]
-const VALIDATION_FAILED: &'static str = "Validation failed";
+const VALIDATION_FAILED: &str = "Validation failed";
 #[cfg(not(feature = "validation"))]
 const VALIDATION_FAILED: &str =
     "Validation module not enabled: build with cargo build --features=validation";

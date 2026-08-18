@@ -76,10 +76,10 @@ pub fn SortHuffmanTreeItems<Comparator: HuffmanComparator>(
     static gaps: [usize; 6] = [132, 57, 23, 10, 4, 1];
     if n < 13 {
         for i in 1..n {
-            let mut tmp: HuffmanTree = items[i];
+            let tmp: HuffmanTree = items[i];
             let mut k: usize = i;
             let mut j: usize = i.wrapping_sub(1);
-            while comparator.Cmp(&mut tmp, &mut items[j]) {
+            while comparator.Cmp(&tmp, &items[j]) {
                 items[k] = items[j];
                 k = j;
                 if {
@@ -100,8 +100,8 @@ pub fn SortHuffmanTreeItems<Comparator: HuffmanComparator>(
                 let gap: usize = gaps[g as usize];
                 for i in gap..n {
                     let mut j: usize = i;
-                    let mut tmp: HuffmanTree = items[i];
-                    while j >= gap && (comparator.Cmp(&mut tmp, &mut items[j.wrapping_sub(gap)])) {
+                    let tmp: HuffmanTree = items[i];
+                    while j >= gap && (comparator.Cmp(&tmp, &items[j.wrapping_sub(gap)])) {
                         {
                             items[j] = items[j.wrapping_sub(gap)];
                         }
@@ -218,8 +218,8 @@ pub fn BrotliOptimizeHuffmanCountsForRle(
     let mut limit: usize;
     let mut sum: usize;
     let streak_limit: usize = 1240usize;
-    for i in 0usize..length {
-        if counts[i] != 0 {
+    for &count in counts.iter().take(length) {
+        if count != 0 {
             nonzero_count = nonzero_count.wrapping_add(1);
         }
     }
@@ -235,11 +235,11 @@ pub fn BrotliOptimizeHuffmanCountsForRle(
     {
         let mut nonzeros: usize = 0usize;
         let mut smallest_nonzero: u32 = (1i32 << 30) as u32;
-        for i in 0usize..length {
-            if counts[i] != 0u32 {
+        for &count in counts.iter().take(length) {
+            if count != 0u32 {
                 nonzeros = nonzeros.wrapping_add(1);
-                if smallest_nonzero > counts[i] {
-                    smallest_nonzero = counts[i];
+                if smallest_nonzero > count {
+                    smallest_nonzero = count;
                 }
             }
         }

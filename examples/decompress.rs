@@ -25,9 +25,8 @@ fn main() {
                     if size == 0 {
                         break;
                     }
-                    match io::stdout().write_all(&buf[..size]) {
-                        Err(e) => panic!("{}", e),
-                        Ok(_) => {}
+                    if let Err(e) = io::stdout().write_all(&buf[..size]) {
+                        panic!("{}", e)
                     }
                 }
             }

@@ -2,9 +2,9 @@ mod test;
 
 use alloc::SliceWrapper;
 use core::cmp::min;
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", not(feature = "pass-through-ffi-panics")))]
 use std::io::Write;
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", not(feature = "pass-through-ffi-panics")))]
 use std::panic;
 
 use brotli_decompressor::ffi::alloc_util::SubclassableAllocator;

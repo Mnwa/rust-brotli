@@ -74,10 +74,10 @@ impl<'a> CDF<'a> {
         }
         if self.cdf[15] >= speed.1 {
             const CDF_BIAS: [u16; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-            for nibble_index in 0..16 {
-                let tmp = &mut self.cdf[nibble_index];
-                *tmp = (tmp.wrapping_add(CDF_BIAS[nibble_index]))
-                    .wrapping_sub(tmp.wrapping_add(CDF_BIAS[nibble_index]) >> 2);
+            for (value, bias) in self.cdf.iter_mut().zip(CDF_BIAS) {
+                *value = value
+                    .wrapping_add(bias)
+                    .wrapping_sub(value.wrapping_add(bias) >> 2);
             }
         }
     }
@@ -213,10 +213,15 @@ impl<'a, Alloc: alloc::Allocator<u16> + alloc::Allocator<u32> + alloc::Allocator
     ) {
         type CurPrior = Stride1Prior;
         {
-            for i in 0..8 {
+            for (i, (prior_data, &prior)) in self
+                .stride_priors
+                .iter_mut()
+                .zip(stride_prior.iter())
+                .enumerate()
+            {
                 let mut cdf = CurPrior::lookup_mut(
-                    self.stride_priors[i].slice_mut(),
-                    stride_prior[i],
+                    prior_data.slice_mut(),
+                    prior,
                     selected_bits,
                     cm_prior,
                     None,
@@ -226,10 +231,15 @@ impl<'a, Alloc: alloc::Allocator<u16> + alloc::Allocator<u32> + alloc::Allocator
             }
         }
         {
-            for i in 0..8 {
+            for (i, (prior_data, &prior)) in self
+                .stride_priors
+                .iter_mut()
+                .zip(stride_prior.iter())
+                .enumerate()
+            {
                 let mut cdf = CurPrior::lookup_mut(
-                    self.stride_priors[i].slice_mut(),
-                    stride_prior[i],
+                    prior_data.slice_mut(),
+                    prior,
                     selected_bits,
                     cm_prior,
                     Some(literal >> 4),

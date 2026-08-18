@@ -281,12 +281,11 @@ where
                     }
                 }
             }
-            let op: BrotliEncoderOperation;
-            if available_in == 0 {
-                op = BrotliEncoderOperation::BROTLI_OPERATION_FINISH;
+            let op = if available_in == 0 {
+                BrotliEncoderOperation::BROTLI_OPERATION_FINISH
             } else {
-                op = BrotliEncoderOperation::BROTLI_OPERATION_PROCESS;
-            }
+                BrotliEncoderOperation::BROTLI_OPERATION_PROCESS
+            };
             let result = s.compress_stream(
                 op,
                 &mut available_in,
@@ -304,7 +303,7 @@ where
                 assert_eq!(next_out_offset, lim);
                 next_out_offset = 0;
                 while next_out_offset < lim {
-                    match w.write(&mut output_buffer[next_out_offset..lim]) {
+                    match w.write(&output_buffer[next_out_offset..lim]) {
                         Err(e) => {
                             BrotliEncoderDestroyInstance(s);
                             read_err?;

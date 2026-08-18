@@ -153,10 +153,10 @@ mod test {
         if t1 < 0.0 {
             t1 = -t1;
         }
-        if (!(t1 < tol)) {
+        if t1.partial_cmp(&tol) != Some(core::cmp::Ordering::Less) {
             assert_eq!(a, b);
         }
-        if (!(t0 < tol)) {
+        if t0.partial_cmp(&tol) != Some(core::cmp::Ordering::Less) {
             assert_eq!(a, b);
         }
     }

@@ -230,8 +230,12 @@ impl<
             matches &= (1u64 << stored) - 1;
         }
 
-        for i in 0..self.common.params.num_last_distances_to_check as usize {
-            let backward = distance_cache[i] as usize;
+        for (i, &cached_distance) in distance_cache
+            .iter()
+            .enumerate()
+            .take(self.common.params.num_last_distances_to_check as usize)
+        {
+            let backward = cached_distance as usize;
             let mut prev_ix = cur_ix.wrapping_sub(backward);
             if prev_ix >= cur_ix || backward > max_backward {
                 continue;
@@ -316,10 +320,12 @@ impl<
         self.tags.slice_mut()[offset] = tag;
         self.num.slice_mut()[key] = num.wrapping_sub(1);
 
-        if min_score == out.score && dictionary.is_some() {
+        if min_score == out.score
+            && let Some(dictionary) = dictionary
+        {
             is_match_found = SearchInStaticDictionary(
                 level,
-                dictionary.unwrap(),
+                dictionary,
                 dictionary_hash,
                 self,
                 cur_data,

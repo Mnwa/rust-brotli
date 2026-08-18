@@ -237,15 +237,23 @@ impl<AllocF: Allocator<floatX>> ZopfliCostModel<AllocF> {
         );
         literal_costs[0] = 0.0 as (floatX);
         for i in 0usize..num_bytes {
-            literal_carry = literal_carry + literal_costs[i.wrapping_add(1)];
+            literal_carry += literal_costs[i.wrapping_add(1)];
             literal_costs[i.wrapping_add(1)] = literal_costs[i] + literal_carry;
             literal_carry -= literal_costs[i.wrapping_add(1)] - literal_costs[i];
         }
-        for i in 0..BROTLI_NUM_COMMAND_SYMBOLS {
-            cost_cmd[i] = FastLog2(11 + i as u64);
+        for (i, cost) in cost_cmd
+            .iter_mut()
+            .enumerate()
+            .take(BROTLI_NUM_COMMAND_SYMBOLS)
+        {
+            *cost = FastLog2(11 + i as u64);
         }
-        for i in 0usize..self.distance_histogram_size as usize {
-            cost_dist[i] = FastLog2((20u64).wrapping_add(i as (u64))) as (floatX);
+        for (i, cost) in cost_dist
+            .iter_mut()
+            .enumerate()
+            .take(self.distance_histogram_size as usize)
+        {
+            *cost = FastLog2((20u64).wrapping_add(i as u64)) as floatX;
         }
         self.min_cost_cmd_ = FastLog2(11) as (floatX);
     }
@@ -507,9 +515,7 @@ fn FindAllMatchesH10Simd<
         );
         matches_offset += loc_offset;
     }
-    for i in 0..=37 {
-        dict_matches[i] = kInvalidMatch
-    }
+    dict_matches[..=37].fill(kInvalidMatch);
     {
         let minlen = max(4, best_len.wrapping_add(1));
         if dictionary.is_some()
@@ -524,8 +530,12 @@ fn FindAllMatchesH10Simd<
         {
             assert!(params.use_dictionary);
             let maxlen = min(37, max_length);
-            for l in minlen..=maxlen {
-                let dict_id: u32 = dict_matches[l];
+            for (l, &dict_id) in dict_matches
+                .iter()
+                .enumerate()
+                .take(maxlen + 1)
+                .skip(minlen)
+            {
                 if dict_id < kInvalidMatch {
                     let distance: usize = max_backward
                         .wrapping_add(gap)
@@ -577,7 +587,7 @@ fn ComputeDistanceShortcut(
     {
         pos as u32
     } else {
-        nodes[pos.wrapping_sub(clen).wrapping_sub(ilen) as usize]
+        nodes[pos.wrapping_sub(clen).wrapping_sub(ilen)]
             .u
             .as_shortcut()
     }
@@ -607,7 +617,7 @@ fn ComputeDistanceCache(
             idx += 1;
             _old
         } as usize)] = dist as i32;
-        p = nodes[p.wrapping_sub(clen).wrapping_sub(ilen) as usize]
+        p = nodes[p.wrapping_sub(clen).wrapping_sub(ilen)]
             .u
             .as_shortcut() as usize;
     }
@@ -675,7 +685,7 @@ fn EvaluateNode<AllocF: Allocator<floatX>>(
             nodes,
             &mut posdata.distance_cache[..],
         );
-        queue.push(&mut posdata);
+        queue.push(&posdata);
     }
 }
 
@@ -834,7 +844,7 @@ fn UpdateNodesSimd<S: Simd, AllocF: Allocator<floatX>>(
             let backward: usize = (posdata.distance_cache[(idx & distance_cache_len_minus_1)]
                 + i32::from(kDistanceCacheOffset[j])) as usize;
             let mut prev_ix: usize = cur_ix.wrapping_sub(backward);
-            let len: usize;
+
             let continuation: u8 = ringbuffer[cur_ix_masked.wrapping_add(best_len)];
             /*
             if let Some(breakpoint) = ringbuffer_break {
@@ -868,7 +878,7 @@ fn UpdateNodesSimd<S: Simd, AllocF: Allocator<floatX>>(
             {
                 continue;
             }
-            len = fix_unbroken_len(
+            let len: usize = fix_unbroken_len(
                 FindMatchLengthWithLimitSimd(
                     simd,
                     &ringbuffer[prev_ix..],
@@ -1200,9 +1210,6 @@ where
     (nodes[0]).length = 0u32;
     (nodes[0]).u = Union1::cost(0.0);
     model = ZopfliCostModel::init(m, &params.dist, num_bytes);
-    if !(0i32 == 0) {
-        return 0usize;
-    }
     model.set_from_literal_costs(position, ringbuffer, ringbuffer_mask);
     queue = StartPosQueue::default();
     dispatch!(level, simd => ShortestPathPositionsSimd(
@@ -1300,9 +1307,6 @@ pub(crate) fn BrotliCreateZopfliBackwardReferencesAtLevel<
     let max_backward_limit: usize = (1usize << params.lgwin).wrapping_sub(16);
     // FIXME: makes little sense to test if N+1 > 0 -- always true unless wrapping. Perhaps use allocate() instead?
     let mut nodes = alloc_or_default::<ZopfliNode, _>(alloc, num_bytes + 1);
-    if !(0i32 == 0) {
-        return;
-    }
     BrotliInitZopfliNodes(nodes.slice_mut(), num_bytes.wrapping_add(1));
     *num_commands = num_commands.wrapping_add(BrotliZopfliComputeShortestPathAtLevel(
         level,
@@ -1319,9 +1323,6 @@ pub(crate) fn BrotliCreateZopfliBackwardReferencesAtLevel<
         hasher,
         nodes.slice_mut(),
     ));
-    if !(0i32 == 0) {
-        return;
-    }
     BrotliZopfliCreateCommands(
         num_bytes,
         position,
@@ -1341,28 +1342,28 @@ pub(crate) fn BrotliCreateZopfliBackwardReferencesAtLevel<
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn SetCost(histogram: &[u32], histogram_size: usize, literal_histogram: bool, cost: &mut [floatX]) {
     let mut sum: u64 = 0;
-    for i in 0..histogram_size {
-        sum = sum.wrapping_add(u64::from(histogram[i]));
+    for &count in histogram.iter().take(histogram_size) {
+        sum = sum.wrapping_add(u64::from(count));
     }
     let log2sum = FastLog2(sum);
 
     let mut missing_symbol_sum = sum;
     if !literal_histogram {
-        for i in 0..histogram_size {
-            if histogram[i] == 0 {
+        for &count in histogram.iter().take(histogram_size) {
+            if count == 0 {
                 missing_symbol_sum = missing_symbol_sum.wrapping_add(1);
             }
         }
     }
 
     let missing_symbol_cost = FastLog2f64(missing_symbol_sum) + 2.0;
-    for i in 0..histogram_size {
-        if histogram[i] == 0 {
-            cost[i] = missing_symbol_cost;
+    for (&count, cost) in histogram.iter().zip(cost.iter_mut()).take(histogram_size) {
+        if count == 0 {
+            *cost = missing_symbol_cost;
         } else {
-            cost[i] = log2sum - FastLog2(u64::from(histogram[i]));
-            if cost[i] < 1.0 {
-                cost[i] = 1.0;
+            *cost = log2sum - FastLog2(u64::from(count));
+            if *cost < 1.0 {
+                *cost = 1.0;
             }
         }
     }
@@ -1431,8 +1432,8 @@ impl<AllocF: Allocator<floatX>> ZopfliCostModel<AllocF> {
             false,
             self.cost_dist_.slice_mut(),
         );
-        for i in 0usize..704usize {
-            min_cost_cmd = min_cost_cmd.min(cost_cmd[i]);
+        for &cost in cost_cmd.iter().take(704) {
+            min_cost_cmd = min_cost_cmd.min(cost);
         }
         self.min_cost_cmd_ = min_cost_cmd;
         {
@@ -1694,9 +1695,6 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
                     matches_size = new_size;
                 }
             }
-            if !(0i32 == 0) {
-                return;
-            }
             let num_found_matches: usize = FindAllMatchesH10(
                 level,
                 hasher,
@@ -1761,13 +1759,7 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
     let orig_num_commands: usize = *num_commands;
     // FIXME: makes little sense to test if N+1 > 0 -- always true unless wrapping. Perhaps use allocate() instead?
     let mut nodes = alloc_or_default::<ZopfliNode, _>(alloc, num_bytes + 1);
-    if !(0i32 == 0) {
-        return;
-    }
     model = ZopfliCostModel::init(alloc, &params.dist, num_bytes);
-    if !(0i32 == 0) {
-        return;
-    }
     for i in 0usize..2usize {
         BrotliInitZopfliNodes(nodes.slice_mut(), num_bytes.wrapping_add(1));
         if i == 0usize {
@@ -1804,7 +1796,7 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
             max_backward_limit,
             gap,
             dist_cache,
-            &mut model,
+            &model,
             num_matches.slice(),
             matches.slice(),
             nodes.slice_mut(),

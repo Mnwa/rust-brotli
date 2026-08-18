@@ -1,10 +1,8 @@
 use crate::enc::floatX;
 
 fn parse_as_utf8(input: &[u8], size: usize) -> (usize, i32) {
-    if (input[0] & 0x80) == 0 {
-        if input[0] > 0 {
-            return (1, i32::from(input[0]));
-        }
+    if (input[0] & 0x80) == 0 && input[0] > 0 {
+        return (1, i32::from(input[0]));
     }
     if size > 1 && (input[0] & 0xe0) == 0xc0 && (input[1] & 0xc0) == 0x80 {
         let symbol = (input[0] as i32 & 0x1f) << 6 | input[1] as i32 & 0x3f;

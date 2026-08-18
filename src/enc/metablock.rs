@@ -239,9 +239,9 @@ pub fn BrotliBuildMetaBlock<Alloc: BrotliAlloc>(
     BrotliBuildHistogramsWithContext(
         cmds,
         num_commands,
-        &mut mb.literal_split,
-        &mut mb.command_split,
-        &mut mb.distance_split,
+        &mb.literal_split,
+        &mb.command_split,
+        &mb.distance_split,
         ringbuffer,
         pos,
         mask,
@@ -339,6 +339,7 @@ pub struct ContextBlockSplitter {
     pub merge_last_count_: usize,
 }
 
+#[allow(clippy::large_enum_variant)] // Boxing would add allocation/indirection to the hot path.
 enum LitBlocks {
     plain(BlockSplitter),      //<'a, HistogramLiteral, AllocU8, AllocU32, AllocHL>,
     ctx(ContextBlockSplitter), //<'a, AllocU8, AllocU32, AllocHL>,
@@ -585,10 +586,8 @@ fn BlockSplitterFinishBlock<
         for j in 0..2 {
             let last_histogram_ix: usize = xself.last_histogram_ix_[j];
             HistogramAddHistogram(&mut combined_histo[j], &histograms[last_histogram_ix]);
-            combined_entropy[j] = BitsEntropy(
-                &mut combined_histo[j].slice_mut()[0..],
-                xself.alphabet_size_,
-            );
+            combined_entropy[j] =
+                BitsEntropy(&combined_histo[j].slice_mut()[0..], xself.alphabet_size_);
             diff[j] = combined_entropy[j] - entropy - xself.last_entropy_[j];
         }
         if split.num_types < 256usize
@@ -673,8 +672,8 @@ fn ContextBlockSplitterFinishBlock<
     if xself.num_blocks_ == 0usize {
         split.lengths.slice_mut()[0] = xself.block_size_ as u32;
         split.types.slice_mut()[0] = 0u8;
-        for i in 0usize..num_contexts {
-            xself.last_entropy_[i] = BitsEntropy((histograms[i]).slice(), xself.alphabet_size_);
+        for (i, histogram) in histograms.iter().enumerate().take(num_contexts) {
+            xself.last_entropy_[i] = BitsEntropy(histogram.slice(), xself.alphabet_size_);
             xself.last_entropy_[num_contexts.wrapping_add(i)] = xself.last_entropy_[i];
         }
         xself.num_blocks_ = xself.num_blocks_.wrapping_add(1);
@@ -692,10 +691,10 @@ fn ContextBlockSplitterFinishBlock<
         let mut combined_histo = m.alloc_cell(2 * num_contexts);
         let mut combined_entropy = [0.0; 2 * BROTLI_MAX_STATIC_CONTEXTS];
         let mut diff = [0.0; 2];
-        for i in 0usize..num_contexts {
+        for (i, entropy) in entropy.iter_mut().enumerate().take(num_contexts) {
             let curr_histo_ix: usize = xself.curr_histogram_ix_.wrapping_add(i);
             let mut j: usize;
-            entropy[i] = BitsEntropy((histograms[curr_histo_ix]).slice(), xself.alphabet_size_);
+            *entropy = BitsEntropy((histograms[curr_histo_ix]).slice(), xself.alphabet_size_);
             j = 0usize;
             while j < 2usize {
                 {
@@ -704,11 +703,11 @@ fn ContextBlockSplitterFinishBlock<
                     combined_histo.slice_mut()[jx] = histograms[curr_histo_ix].clone();
                     HistogramAddHistogram(
                         &mut combined_histo.slice_mut()[jx],
-                        &mut histograms[last_histogram_ix],
+                        &histograms[last_histogram_ix],
                     );
                     combined_entropy[jx] =
                         BitsEntropy(combined_histo.slice()[jx].slice(), xself.alphabet_size_);
-                    diff[j] += combined_entropy[jx] - entropy[i] - xself.last_entropy_[jx];
+                    diff[j] += combined_entropy[jx] - *entropy - xself.last_entropy_[jx];
                 }
                 j = j.wrapping_add(1);
             }
@@ -721,9 +720,9 @@ fn ContextBlockSplitterFinishBlock<
             split.types.slice_mut()[xself.num_blocks_] = split.num_types as u8;
             xself.last_histogram_ix_[1] = xself.last_histogram_ix_[0];
             xself.last_histogram_ix_[0] = split.num_types.wrapping_mul(num_contexts);
-            for i in 0usize..num_contexts {
+            for (i, &entropy) in entropy.iter().enumerate().take(num_contexts) {
                 xself.last_entropy_[num_contexts.wrapping_add(i)] = xself.last_entropy_[i];
-                xself.last_entropy_[i] = entropy[i];
+                xself.last_entropy_[i] = entropy;
             }
             xself.num_blocks_ = xself.num_blocks_.wrapping_add(1);
             split.num_types = split.num_types.wrapping_add(1);
@@ -848,9 +847,9 @@ fn MapStaticContexts<
     );
     for i in 0usize..mb.literal_split.num_types {
         let offset: u32 = i.wrapping_mul(num_contexts) as u32;
-        for j in 0usize..(1u32 << 6) as usize {
+        for (j, &context) in static_context_map.iter().enumerate().take(1 << 6) {
             mb.literal_context_map.slice_mut()[(i << 6).wrapping_add(j)] =
-                offset.wrapping_add(static_context_map[j]);
+                offset.wrapping_add(context);
         }
     }
 }
@@ -878,8 +877,8 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
     let mut cmd_blocks: BlockSplitter;
     let mut dist_blocks: BlockSplitter;
     let mut num_literals: usize = 0usize;
-    for i in 0usize..n_commands {
-        num_literals = num_literals.wrapping_add((commands[i]).insert_len_ as usize);
+    for command in commands.iter().take(n_commands) {
+        num_literals = num_literals.wrapping_add(command.insert_len_ as usize);
     }
     lit_blocks = if num_contexts == 1 {
         LitBlocks::plain(InitBlockSplitter::<HistogramLiteral, Alloc>(
@@ -926,8 +925,7 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
         &mut mb.distance_histograms_size,
     );
 
-    for i in 0usize..n_commands {
-        let cmd: Command = commands[i];
+    for cmd in commands.iter().copied().take(n_commands) {
         let mut j: usize;
         BlockSplitterAddSymbol(
             &mut cmd_blocks,
@@ -940,15 +938,15 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
         while j != 0usize {
             {
                 let literal: u8 = ringbuffer[(pos & mask)];
-                match (&mut lit_blocks) {
-                    &mut LitBlocks::plain(ref mut lit_blocks_plain) => BlockSplitterAddSymbol(
+                match lit_blocks {
+                    LitBlocks::plain(ref mut lit_blocks_plain) => BlockSplitterAddSymbol(
                         lit_blocks_plain,
                         &mut mb.literal_split,
                         mb.literal_histograms.slice_mut(),
                         &mut mb.literal_histograms_size,
                         literal as usize,
                     ),
-                    &mut LitBlocks::ctx(ref mut lit_blocks_ctx) => {
+                    LitBlocks::ctx(ref mut lit_blocks_ctx) => {
                         let context: usize =
                             Context(prev_byte, prev_byte2, literal_context_mode) as usize;
                         ContextBlockSplitterAddSymbol(
@@ -958,7 +956,7 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
                             mb.literal_histograms.slice_mut(),
                             &mut mb.literal_histograms_size,
                             literal as usize,
-                            static_context_map[(context as usize)] as usize,
+                            static_context_map[context] as usize,
                         );
                     }
                 }
@@ -983,15 +981,15 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
             }
         }
     }
-    match (&mut lit_blocks) {
-        &mut LitBlocks::plain(ref mut lit_blocks_plain) => BlockSplitterFinishBlock(
+    match lit_blocks {
+        LitBlocks::plain(ref mut lit_blocks_plain) => BlockSplitterFinishBlock(
             lit_blocks_plain,
             &mut mb.literal_split,
             mb.literal_histograms.slice_mut(),
             &mut mb.literal_histograms_size,
             true,
         ),
-        &mut LitBlocks::ctx(ref mut lit_blocks_ctx) => ContextBlockSplitterFinishBlock(
+        LitBlocks::ctx(ref mut lit_blocks_ctx) => ContextBlockSplitterFinishBlock(
             lit_blocks_ctx,
             alloc,
             &mut mb.literal_split,
