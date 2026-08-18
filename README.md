@@ -199,10 +199,13 @@ cargo run --release --example decompress < input.txt.br > restored.txt
 - **Optional profiling.** Feature-gated instrumentation attributes encoder time or allocations by
   pipeline stage without affecting default builds.
 
-Compressed streams remain byte-for-byte identical to the upstream implementation. The test matrix
+Compressed streams remain fully compatible with the upstream implementation; some quality levels
+and corpora are byte-identical, but byte identity is not a general guarantee. The test matrix
 compares qualities 0–11, including the 9.5 variants, across multiple corpora. On one 3.1 MB varied
 corpus (Apple M5 Pro, NEON, release with LTO), encoding was about 11% faster at q9, 15% at q10, and
-8% at q11. Results depend on the CPU and input, so benchmark your own workload.
+8% at q11. Results depend on the CPU and input, so benchmark your own workload. See the
+[complete comparison with Google Brotli 1.2.0](C_BROTLI_COMPARISON.md) for all-quality timings,
+output sizes, compatibility checks, implementation differences, and reproduction commands.
 
 See the [changelog](CHANGELOG.md) for release details and verification results.
 

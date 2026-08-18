@@ -49,17 +49,7 @@ pub fn BROTLI_UNALIGNED_LOAD64(sl: &[u8]) -> u64 {
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_STORE64(outp: &mut [u8], v: u64) {
     debug_assert!(outp.len() >= size_of::<u64>());
-    let p = [
-        (v & 0xff) as u8,
-        ((v >> 8) & 0xff) as u8,
-        ((v >> 16) & 0xff) as u8,
-        ((v >> 24) & 0xff) as u8,
-        ((v >> 32) & 0xff) as u8,
-        ((v >> 40) & 0xff) as u8,
-        ((v >> 48) & 0xff) as u8,
-        ((v >> 56) & 0xff) as u8,
-    ];
-    outp[0..p.len()].copy_from_slice(&p[..]);
+    outp[..size_of::<u64>()].copy_from_slice(&v.to_le_bytes());
 }
 
 macro_rules! sub_match {
