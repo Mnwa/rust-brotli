@@ -25,7 +25,7 @@ Or add it to `Cargo.toml`:
 
 ```toml
 [dependencies]
-simd-brotli = "9.1"
+simd-brotli = "10"
 ```
 
 The default feature set enables the standard-library stream APIs. For a `no_std` project, disable
@@ -33,7 +33,7 @@ default features:
 
 ```toml
 [dependencies]
-simd-brotli = { version = "9.1", default-features = false }
+simd-brotli = { version = "10", default-features = false }
 ```
 
 The minimum supported Rust version is 1.89.0.

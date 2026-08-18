@@ -17,11 +17,46 @@ use crate::enc::vectorization::detect_level;
 
 pub const kInfinity: floatX = 1.7e38;
 
+/// Compact phase-specific payload of a [`ZopfliNode`].
 #[derive(Clone, Copy, Debug)]
-pub enum Union1 {
-    cost(floatX),
-    next(u32),
-    shortcut(u32),
+#[repr(transparent)]
+pub struct Union1(UnionBits);
+
+#[cfg(feature = "float64")]
+type UnionBits = u64;
+#[cfg(not(feature = "float64"))]
+type UnionBits = u32;
+
+impl Union1 {
+    #[inline(always)]
+    pub fn cost(value: floatX) -> Self {
+        Self(value.to_bits())
+    }
+
+    #[inline(always)]
+    pub fn as_cost(self) -> floatX {
+        floatX::from_bits(self.0)
+    }
+
+    #[inline(always)]
+    pub fn next(value: u32) -> Self {
+        Self(value as UnionBits)
+    }
+
+    #[inline(always)]
+    pub fn as_next(self) -> u32 {
+        self.0 as u32
+    }
+
+    #[inline(always)]
+    pub fn shortcut(value: u32) -> Self {
+        Self(value as UnionBits)
+    }
+
+    #[inline(always)]
+    pub fn as_shortcut(self) -> u32 {
+        self.0 as u32
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -34,6 +69,10 @@ pub struct ZopfliNode {
     pub dcode_insert_length: u32,
     pub u: Union1,
 }
+
+#[cfg(not(feature = "float64"))]
+const _: [(); 16] = [(); core::mem::size_of::<ZopfliNode>()];
+
 impl Default for ZopfliNode {
     fn default() -> Self {
         ZopfliNode {

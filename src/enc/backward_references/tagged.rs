@@ -209,6 +209,27 @@ impl<
         out.len = 0;
         out.len_x_code = 0;
 
+        // Start the hash-table load before checking recent distances. This serves the same latency-
+        // hiding purpose as the bucket prefetch in Google Brotli without requiring unsafe,
+        // architecture-specific prefetch intrinsics.
+        let (key, tag) = self.hash_parts(cur_data);
+        let block_bits = self.specialization.block_bits();
+        let block_size = self.specialization.block_size();
+        let block_mask = self.specialization.block_mask();
+        let block_start = key << block_bits;
+        let num = self.num.slice()[key];
+        let head = num.wrapping_add(1) as usize & block_mask;
+        let mut matches = matching_tag_mask(
+            simd,
+            tag,
+            &self.tags.slice()[block_start..block_start + block_size],
+            head,
+        );
+        let stored = u16::MAX.wrapping_sub(num) as usize;
+        if stored < block_size {
+            matches &= (1u64 << stored) - 1;
+        }
+
         for i in 0..self.common.params.num_last_distances_to_check as usize {
             let backward = distance_cache[i] as usize;
             let mut prev_ix = cur_ix.wrapping_sub(backward);
@@ -244,24 +265,6 @@ impl<
         }
 
         best_len = best_len.max(3);
-        let (key, tag) = self.hash_parts(cur_data);
-        let block_bits = self.specialization.block_bits();
-        let block_size = self.specialization.block_size();
-        let block_mask = self.specialization.block_mask();
-        let block_start = key << block_bits;
-        let num = self.num.slice()[key];
-        let head = num.wrapping_add(1) as usize & block_mask;
-        let mut matches = matching_tag_mask(
-            simd,
-            tag,
-            &self.tags.slice()[block_start..block_start + block_size],
-            head,
-        );
-        let stored = u16::MAX.wrapping_sub(num) as usize;
-        if stored < block_size {
-            matches &= (1u64 << stored) - 1;
-        }
-
         while matches != 0 {
             let rb_index = (head + matches.trailing_zeros() as usize) & block_mask;
             matches &= matches - 1;

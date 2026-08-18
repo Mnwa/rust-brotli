@@ -1,6 +1,6 @@
 # Changelog
 
-## 9.1.3
+## 10.0.0
 
 Reduces match-finding overhead by detecting the available SIMD level once at the encoder's outer
 entry points and reusing it throughout each compression pass. Existing public entry points remain
@@ -15,6 +15,35 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
   pass that level into every match-length search.
 - H58/H68 tagged matchers reuse their already-dispatched SIMD token directly when measuring
   candidate matches, avoiding both redundant feature detection and nested SIMD dispatch.
+
+### Quality-6 match finding
+
+- The tagged H58/H68 matcher now starts its hash and SIMD tag-table load before checking recent
+  distances. This overlaps the table-access latency with useful work, mirroring the purpose of
+  Google Brotli's bucket prefetch without architecture-specific or unsafe prefetch intrinsics.
+- Little-endian 32-bit input words are loaded from an exact-width array chunk. On Apple Silicon
+  this lowers to a native unaligned word load instead of several byte/halfword loads, while keeping
+  the helper's existing safe bounds check and target-independent byte order.
+- On `testdata/random_then_unicode` at `-q6 -w22`, a 100-run Apple Silicon release benchmark
+  improved from 7.0 ms to 6.3 ms: **10.0% less wall time, or 1.11x throughput**. Google Brotli
+  1.2.0 measured 5.8 ms on the same input and settings; both implementations emitted the same
+  137,238-byte stream.
+
+### Quality-11 Zopfli nodes
+
+- **Breaking:** the publicly reachable `Union1` changes from a tagged enum to an opaque compact
+  payload struct. Code that matched its variants should use `as_cost`, `as_next`, or `as_shortcut`;
+  the corresponding `cost`, `next`, and `shortcut` constructors remain available.
+- Zopfli's phase-specific cost / next-link / shortcut payload is stored without an enum
+  discriminant, matching the compact union layout used by Google Brotli. A default `ZopfliNode`
+  is now 16 bytes instead of 20, reducing node-array traffic and allocation size by 20%; the
+  `float64` configuration retains a 64-bit payload.
+- Node updates receive the already-selected node and walk one bounds-checked mutable sub-slice per
+  match-length range. This removes repeated `nodes[pos + len]` indexing from the hottest q11 loop.
+- The repeated `hotpath` run reduced attributed `UpdateNodesSimd` time from 1.06 s to 1.00 s.
+  Uninstrumented end-to-end q11 time on this corpus was effectively unchanged at 125.5 ms versus
+  125.0 ms. Google Brotli 1.2.0 measured 229.9 ms, but its 124,710-byte stream differs from this
+  implementation's 124,674-byte stream, so the q11 timing is not an algorithm-identical comparison.
 
 ### Common-prefix scanning
 
@@ -53,7 +82,10 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
 ### Verification
 
 Formatting checks and the full test suite pass, as do the default and `no-default-features` builds.
-`cargo-semver-checks` reports that no SemVer update beyond the patch release is required.
+`cargo-semver-checks --default-features` identified the intentional `Union1` enum-to-struct change
+as a breaking change under a patch release; it accepts the resulting 10.0.0 major version.
+Quality-6 and quality-11 output is byte-identical to the pre-change implementation across six
+textual, random and repetitive corpora; the `hotpath` build also passes.
 
 ## 9.1.2
 

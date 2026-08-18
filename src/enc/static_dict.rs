@@ -34,8 +34,7 @@ pub fn BrotliGetDictionary() -> &'static BrotliDictionary {
 }
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_LOAD32(sl: &[u8]) -> u32 {
-    debug_assert!(sl.len() >= size_of::<u32>());
-    (sl[0] as u32) | ((sl[1] as u32) << 8) | ((sl[2] as u32) << 16) | ((sl[3] as u32) << 24)
+    u32::from_le_bytes(*sl.first_chunk().unwrap())
 }
 #[inline(always)]
 pub fn Hash(data: &[u8]) -> u32 {
@@ -44,15 +43,7 @@ pub fn Hash(data: &[u8]) -> u32 {
 }
 #[inline(always)]
 pub fn BROTLI_UNALIGNED_LOAD64(sl: &[u8]) -> u64 {
-    debug_assert!(sl.len() >= size_of::<u64>());
-    (sl[0] as u64)
-        | ((sl[1] as u64) << 8)
-        | ((sl[2] as u64) << 16)
-        | ((sl[3] as u64) << 24)
-        | ((sl[4] as u64) << 32)
-        | ((sl[5] as u64) << 40)
-        | ((sl[6] as u64) << 48)
-        | ((sl[7] as u64) << 56)
+    u64::from_le_bytes(*sl.first_chunk().unwrap())
 }
 
 #[inline(always)]
