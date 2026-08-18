@@ -834,15 +834,15 @@ fn BrotliStoreHuffmanTreeToBitMask(
     }
 }
 
-pub fn BrotliStoreHuffmanTree(
+fn BrotliStoreHuffmanTreeImpl(
     depths: &[u8],
     num: usize,
     tree: &mut [HuffmanTree],
+    huffman_tree: &mut [u8],
+    huffman_tree_extra_bits: &mut [u8],
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
-    let mut huffman_tree = [0u8; 704];
-    let mut huffman_tree_extra_bits = [0u8; 704];
     let mut huffman_tree_size = 0usize;
     let mut code_length_bitdepth = [0u8; 18];
     let mut code_length_bitdepth_symbols = [0u16; 18];
@@ -855,8 +855,8 @@ pub fn BrotliStoreHuffmanTree(
         depths,
         num,
         &mut huffman_tree_size,
-        &mut huffman_tree[..],
-        &mut huffman_tree_extra_bits[..],
+        huffman_tree,
+        huffman_tree_extra_bits,
     );
     for i in 0usize..huffman_tree_size {
         let _rhs = 1;
@@ -903,10 +903,54 @@ pub fn BrotliStoreHuffmanTree(
     }
     BrotliStoreHuffmanTreeToBitMask(
         huffman_tree_size,
-        &huffman_tree,
-        &huffman_tree_extra_bits,
+        huffman_tree,
+        huffman_tree_extra_bits,
         &code_length_bitdepth,
         &code_length_bitdepth_symbols,
+        storage_ix,
+        storage,
+    );
+}
+
+pub(crate) fn BrotliStoreHuffmanTreeWithScratch(
+    depths: &[u8],
+    num: usize,
+    tree: &mut [HuffmanTree],
+    huffman_tree: &mut [u8],
+    huffman_tree_extra_bits: &mut [u8],
+    storage_ix: &mut usize,
+    storage: &mut [u8],
+) {
+    // BrotliWriteHuffmanTree emits at most one entry per input depth; repeats
+    // only reduce that count. It overwrites every entry that is subsequently read.
+    assert!(huffman_tree.len() >= num);
+    assert!(huffman_tree_extra_bits.len() >= num);
+    BrotliStoreHuffmanTreeImpl(
+        depths,
+        num,
+        tree,
+        huffman_tree,
+        huffman_tree_extra_bits,
+        storage_ix,
+        storage,
+    );
+}
+
+pub fn BrotliStoreHuffmanTree(
+    depths: &[u8],
+    num: usize,
+    tree: &mut [HuffmanTree],
+    storage_ix: &mut usize,
+    storage: &mut [u8],
+) {
+    let mut huffman_tree = [0u8; 704];
+    let mut huffman_tree_extra_bits = [0u8; 704];
+    BrotliStoreHuffmanTreeImpl(
+        depths,
+        num,
+        tree,
+        &mut huffman_tree,
+        &mut huffman_tree_extra_bits,
         storage_ix,
         storage,
     );

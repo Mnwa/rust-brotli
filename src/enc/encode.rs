@@ -20,7 +20,9 @@ use super::brotli_bit_stream::{
 use super::combined_alloc::BrotliAlloc;
 use super::command::{BrotliDistanceParams, Command, get_length_code};
 use super::compress_fragment::compress_fragment_fast;
-use super::compress_fragment_two_pass::{BrotliWriteBits, compress_fragment_two_pass};
+use super::compress_fragment_two_pass::{
+    BrotliWriteBits, CommandPrefixCodeScratch, compress_fragment_two_pass,
+};
 use super::constants::{
     BROTLI_CONTEXT, BROTLI_CONTEXT_LUT, BROTLI_MAX_NDIRECT, BROTLI_MAX_NPOSTFIX,
     BROTLI_NUM_HISTOGRAM_DISTANCE_SYMBOLS, BROTLI_WINDOW_GAP,
@@ -175,6 +177,7 @@ pub struct BrotliEncoderStateStruct<Alloc: BrotliAlloc> {
     pub cmd_bits_: [u16; 128],
     pub cmd_code_: [u8; 512],
     pub cmd_code_numbits_: usize,
+    pub(crate) command_prefix_scratch_: CommandPrefixCodeScratch,
     pub command_buf_: <Alloc as Allocator<u32>>::AllocatedMemory,
     pub literal_buf_: <Alloc as Allocator<u8>>::AllocatedMemory,
     next_out_: NextOut,
@@ -453,6 +456,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
             last_bytes_: 0,
             last_bytes_bits_: 0,
             cmd_code_: [0; 512],
+            command_prefix_scratch_: CommandPrefixCodeScratch::new(),
             m8,
             remaining_metadata_bytes_: 0,
             small_table_: [0; 1024],
@@ -2435,6 +2439,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                         &mut self.cmd_bits_[..],
                         &mut self.cmd_code_numbits_,
                         &mut self.cmd_code_[..],
+                        &mut self.command_prefix_scratch_,
                         &mut storage_ix,
                         self.storage_.slice_mut(),
                     );
@@ -2448,6 +2453,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                         self.literal_buf_.slice_mut(),
                         table,
                         table_size,
+                        &mut self.command_prefix_scratch_,
                         &mut storage_ix,
                         self.storage_.slice_mut(),
                     );
@@ -2867,6 +2873,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                         &mut self.cmd_bits_[..],
                         &mut self.cmd_code_numbits_,
                         &mut self.cmd_code_[..],
+                        &mut self.command_prefix_scratch_,
                         &mut storage_ix,
                         storage,
                     );
@@ -2880,6 +2887,7 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                         literal_buf.slice_mut(),
                         table,
                         table_size,
+                        &mut self.command_prefix_scratch_,
                         &mut storage_ix,
                         storage,
                     );

@@ -5,7 +5,9 @@ use fearless_simd::Level;
 use super::super::alloc;
 use super::backward_references::kHashMul32;
 use super::bit_cost::BitsEntropy;
-use super::brotli_bit_stream::{BrotliBuildAndStoreHuffmanTreeFast, BrotliStoreHuffmanTree};
+use super::brotli_bit_stream::{
+    BrotliBuildAndStoreHuffmanTreeFast, BrotliStoreHuffmanTreeWithScratch,
+};
 use super::entropy_encode::{
     BrotliConvertBitDepthsToSymbols, BrotliCreateHuffmanTree, HuffmanTree,
 };
@@ -16,6 +18,33 @@ use super::static_dict::{
 use super::util::{Log2FloorNonZero, floatX};
 use super::vectorization::detect_level;
 static kCompressFragmentTwoPassBlockSize: usize = (1i32 << 17) as usize;
+// The sparse command alphabet's last populated slot is 448 + 8 * 7 = 504.
+// The former 704-entry tail was always zero and never affected the bitstream.
+const COMMAND_PREFIX_CODE_DEPTH_SIZE: usize = 505;
+
+// Keep the fully initialized work buffers on the encoder state so the hot path
+// only clears the depth slots whose zero values are semantically significant.
+// Cache-line alignment also isolates them from unrelated hot encoder fields.
+#[repr(align(64))]
+pub(crate) struct CommandPrefixCodeScratch {
+    pub(crate) tree: [HuffmanTree; 129],
+    pub(crate) cmd_depth: [u8; COMMAND_PREFIX_CODE_DEPTH_SIZE],
+    pub(crate) cmd_bits: [u16; 64],
+    pub(crate) huffman_tree: [u8; COMMAND_PREFIX_CODE_DEPTH_SIZE],
+    pub(crate) huffman_tree_extra_bits: [u8; COMMAND_PREFIX_CODE_DEPTH_SIZE],
+}
+
+impl CommandPrefixCodeScratch {
+    pub(crate) fn new() -> Self {
+        Self {
+            tree: [HuffmanTree::new(0, 0, 0); 129],
+            cmd_depth: [0; COMMAND_PREFIX_CODE_DEPTH_SIZE],
+            cmd_bits: [0; 64],
+            huffman_tree: [0; COMMAND_PREFIX_CODE_DEPTH_SIZE],
+            huffman_tree_extra_bits: [0; COMMAND_PREFIX_CODE_DEPTH_SIZE],
+        }
+    }
+}
 
 // returns number of commands inserted
 fn EmitInsertLen(insertlen: u32, commands: &mut &mut [u32]) -> usize {
@@ -448,20 +477,20 @@ fn BuildAndStoreCommandPrefixCode(
     histogram: &[u32],
     depth: &mut [u8],
     bits: &mut [u16],
+    scratch: &mut CommandPrefixCodeScratch,
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
-    let mut tree = [HuffmanTree::new(0, 0, 0); 129];
-    let mut cmd_depth: [u8; 704] = [0; 704];
-    let mut cmd_bits: [u16; 64] = [0; 64];
-    BrotliCreateHuffmanTree(histogram, 64usize, 15i32, &mut tree[..], depth);
-    BrotliCreateHuffmanTree(
-        &histogram[64..],
-        64usize,
-        14i32,
-        &mut tree[..],
-        &mut depth[64..],
-    );
+    let CommandPrefixCodeScratch {
+        tree,
+        cmd_depth,
+        cmd_bits,
+        huffman_tree,
+        huffman_tree_extra_bits,
+    } = scratch;
+    cmd_depth[64..].fill(0);
+    BrotliCreateHuffmanTree(histogram, 64usize, 15i32, tree, depth);
+    BrotliCreateHuffmanTree(&histogram[64..], 64usize, 14i32, tree, &mut depth[64..]);
     /* We have to jump through a few hoops here in order to compute
     the command bits because the symbols are in a different order than in
     the full alphabet. This looks complicated, but having the symbols
@@ -473,17 +502,16 @@ fn BuildAndStoreCommandPrefixCode(
     memcpy(&mut cmd_depth[..], 40usize, depth, (8usize), 8usize);
     memcpy(&mut cmd_depth[..], 48usize, depth, (56usize), 8usize);
     memcpy(&mut cmd_depth[..], 56usize, depth, (16usize), 8usize);
-    BrotliConvertBitDepthsToSymbols(&mut cmd_depth[..], 64usize, &mut cmd_bits[..]);
-    memcpy(bits, 0, &cmd_bits[..], 24usize, 16usize);
-    memcpy(bits, (8usize), &cmd_bits[..], 40usize, 8usize);
-    memcpy(bits, (16usize), &cmd_bits[..], 56usize, 8usize);
-    memcpy(bits, (24usize), &cmd_bits[..], 0, 48usize);
-    memcpy(bits, (48usize), &cmd_bits[..], 32usize, 8usize);
-    memcpy(bits, (56usize), &cmd_bits[..], 48usize, 8usize);
+    BrotliConvertBitDepthsToSymbols(cmd_depth, 64usize, cmd_bits);
+    memcpy(bits, 0, cmd_bits, 24usize, 16usize);
+    memcpy(bits, (8usize), cmd_bits, 40usize, 8usize);
+    memcpy(bits, (16usize), cmd_bits, 56usize, 8usize);
+    memcpy(bits, (24usize), cmd_bits, 0, 48usize);
+    memcpy(bits, (48usize), cmd_bits, 32usize, 8usize);
+    memcpy(bits, (56usize), cmd_bits, 48usize, 8usize);
     BrotliConvertBitDepthsToSymbols(&mut depth[64..], 64usize, &mut bits[64..]);
     {
         cmd_depth[..64].fill(0);
-        //memset(&mut cmd_depth[..], 0i32, 64usize);
         memcpy(&mut cmd_depth[..], 0, depth, (24usize), 8usize);
         memcpy(&mut cmd_depth[..], 64usize, depth, (32usize), 8usize);
         memcpy(&mut cmd_depth[..], 128usize, depth, (40usize), 8usize);
@@ -495,18 +523,22 @@ fn BuildAndStoreCommandPrefixCode(
             cmd_depth[(448usize).wrapping_add((8usize).wrapping_mul(i))] =
                 depth[i.wrapping_add(16)];
         }
-        BrotliStoreHuffmanTree(
-            &mut cmd_depth[..],
-            704usize,
-            &mut tree[..],
+        BrotliStoreHuffmanTreeWithScratch(
+            cmd_depth,
+            COMMAND_PREFIX_CODE_DEPTH_SIZE,
+            tree,
+            huffman_tree,
+            huffman_tree_extra_bits,
             storage_ix,
             storage,
         );
     }
-    BrotliStoreHuffmanTree(
+    BrotliStoreHuffmanTreeWithScratch(
         &mut depth[64..],
         64usize,
-        &mut tree[..],
+        tree,
+        huffman_tree,
+        huffman_tree_extra_bits,
         storage_ix,
         storage,
     );
@@ -519,6 +551,7 @@ fn StoreCommands<AllocHT: alloc::Allocator<HuffmanTree>>(
     num_literals: usize,
     commands: &[u32],
     num_commands: usize,
+    command_prefix_scratch: &mut CommandPrefixCodeScratch,
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
@@ -591,6 +624,7 @@ fn StoreCommands<AllocHT: alloc::Allocator<HuffmanTree>>(
         &mut cmd_histo[..],
         &mut cmd_depths[..],
         &mut cmd_bits[..],
+        command_prefix_scratch,
         storage_ix,
         storage,
     );
@@ -651,6 +685,7 @@ fn compress_fragment_two_pass_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     table: &mut [i32],
     table_bits: usize,
     min_match: usize,
+    command_prefix_scratch: &mut CommandPrefixCodeScratch,
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
@@ -687,6 +722,7 @@ fn compress_fragment_two_pass_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                 num_literals,
                 command_buf,
                 num_commands,
+                command_prefix_scratch,
                 storage_ix,
                 storage,
             );
@@ -707,6 +743,7 @@ macro_rules! compress_specialization {
             command_buf: &mut [u32],
             literal_buf: &mut [u8],
             table: &mut [i32],
+            command_prefix_scratch: &mut CommandPrefixCodeScratch,
             storage_ix: &mut usize,
             storage: &mut [u8],
         ) {
@@ -721,6 +758,7 @@ macro_rules! compress_specialization {
                 table,
                 $table_bits,
                 min_match,
+                command_prefix_scratch,
                 storage_ix,
                 storage,
             );
@@ -758,6 +796,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
     literal_buf: &mut [u8],
     table: &mut [i32],
     table_size: usize,
+    command_prefix_scratch: &mut CommandPrefixCodeScratch,
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
@@ -772,6 +811,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -785,6 +825,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -798,6 +839,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -811,6 +853,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -824,6 +867,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -837,6 +881,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -850,6 +895,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -863,6 +909,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -876,6 +923,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );
@@ -889,6 +937,7 @@ pub(crate) fn compress_fragment_two_pass<AllocHT: alloc::Allocator<HuffmanTree>>
             command_buf,
             literal_buf,
             table,
+            command_prefix_scratch,
             storage_ix,
             storage,
         );

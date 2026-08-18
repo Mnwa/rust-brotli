@@ -38,6 +38,18 @@ available through compatibility wrappers, and the MSRV remains 1.89.0.
   loops throughout the encoder and concatenation code, without changing the initialized ranges or
   values.
 
+### Command-prefix Huffman scratch
+
+- The quality-0/1 fragment encoders now reuse safe, fully initialized Huffman construction and
+  serialization scratch buffers from the encoder state. This removes repeated initialization of
+  the 129-node tree, temporary command bits and two serialization buffers without introducing
+  `unsafe` code.
+- The sparse command-depth alphabet is reduced from 704 entries to the 505 entries that can
+  actually be populated. Generated quality-0/1 streams remain byte-identical to the previous
+  implementation.
+- On `testdata/alice29.txt`, Apple Silicon release builds improved quality-0 throughput by roughly
+  3%; quality-1 remained effectively unchanged within corpus and measurement variance.
+
 ### Verification
 
 Formatting checks and the full test suite pass, as do the default and `no-default-features` builds.

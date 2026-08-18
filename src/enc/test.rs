@@ -24,11 +24,12 @@ use super::super::alloc::{
     AllocatedStackMemory, Allocator, SliceWrapper, SliceWrapperMut, StackAllocator, bzero,
 };
 pub use super::super::{BrotliDecompressStream, BrotliResult, BrotliState};
+use super::brotli_bit_stream::{BrotliStoreHuffmanTree, BrotliStoreHuffmanTreeWithScratch};
 use super::cluster::HistogramPair;
 use super::combined_alloc::CombiningAllocator;
 use super::command::Command;
 use super::encode::{BrotliEncoderOperation, BrotliEncoderParameter};
-use super::entropy_encode::HuffmanTree;
+use super::entropy_encode::{BrotliCreateHuffmanTree, HuffmanTree};
 use super::histogram::{ContextType, HistogramCommand, HistogramDistance, HistogramLiteral};
 use super::pdf::PDF;
 use super::{StaticCommand, ZopfliNode, interface, s16, v8};
@@ -602,6 +603,93 @@ fn test_compress_into_short_buffer() {
     w.into_inner();
 
     println!("{output_buffer:?}");
+}
+
+#[test]
+fn test_reused_huffman_tree_scratch_matches_zeroed_storage() {
+    fn compare(
+        depths: &[u8],
+        scratch_tree: &mut [HuffmanTree; 129],
+        huffman_tree: &mut [u8; 505],
+        huffman_tree_extra_bits: &mut [u8; 505],
+    ) {
+        let mut expected_tree = [HuffmanTree::new(0, 0, 0); 129];
+        let mut expected_storage = [0u8; 2048];
+        let mut actual_storage = [0u8; 2048];
+        let mut expected_storage_ix = 3usize;
+        let mut actual_storage_ix = 3usize;
+        expected_storage[0] = 5;
+        actual_storage[0] = 5;
+
+        BrotliStoreHuffmanTree(
+            depths,
+            depths.len(),
+            &mut expected_tree,
+            &mut expected_storage_ix,
+            &mut expected_storage,
+        );
+        BrotliStoreHuffmanTreeWithScratch(
+            depths,
+            depths.len(),
+            scratch_tree,
+            huffman_tree,
+            huffman_tree_extra_bits,
+            &mut actual_storage_ix,
+            &mut actual_storage,
+        );
+
+        assert_eq!(actual_storage_ix, expected_storage_ix);
+        assert_eq!(actual_storage, expected_storage);
+    }
+
+    let mut scratch_tree = [HuffmanTree::new(0, 0, 0); 129];
+    let mut huffman_tree = [0xa5u8; 505];
+    let mut huffman_tree_extra_bits = [0x5au8; 505];
+
+    let mut command_histogram = [0u32; 505];
+    for (count, symbol) in [
+        0usize, 1, 7, 8, 16, 24, 40, 56, 64, 128, 192, 256, 384, 448, 504,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        command_histogram[symbol] = count as u32 + 1;
+    }
+    let mut command_depths = [0u8; 505];
+    let mut command_tree = [HuffmanTree::new(0, 0, 0); 129];
+    BrotliCreateHuffmanTree(
+        &command_histogram,
+        command_histogram.len(),
+        15,
+        &mut command_tree,
+        &mut command_depths,
+    );
+    compare(
+        &command_depths,
+        &mut scratch_tree,
+        &mut huffman_tree,
+        &mut huffman_tree_extra_bits,
+    );
+
+    let mut distance_histogram = [0u32; 64];
+    for (count, symbol) in [0usize, 3, 9, 17, 31, 47, 63].into_iter().enumerate() {
+        distance_histogram[symbol] = count as u32 + 1;
+    }
+    let mut distance_depths = [0u8; 64];
+    let mut distance_tree = [HuffmanTree::new(0, 0, 0); 129];
+    BrotliCreateHuffmanTree(
+        &distance_histogram,
+        distance_histogram.len(),
+        14,
+        &mut distance_tree,
+        &mut distance_depths,
+    );
+    compare(
+        &distance_depths,
+        &mut scratch_tree,
+        &mut huffman_tree,
+        &mut huffman_tree_extra_bits,
+    );
 }
 /*
 
