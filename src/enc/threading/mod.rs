@@ -810,13 +810,19 @@ impl ThreadScope for StdThreadScope {
 /// slot holds its allocator back, except for a slot whose worker panicked.
 ///
 /// ```
-/// use simd_brotli::enc::BrotliEncoderParams;
 /// use simd_brotli::enc::threading::{CompressMultiScoped, StdThreadScope};
-/// use alloc_stdlib::StandardAlloc;
+/// use simd_brotli::enc::{
+///     BrotliEncoderMaxCompressedSizeMulti, BrotliEncoderParams, StandardAlloc,
+/// };
+/// use simd_brotli::BrotliDecompress;
 ///
 /// let input = vec![42u8; 1 << 16];
-/// let mut output = vec![0u8; 1 << 16];
-/// let mut alloc_per_thread = [Some(StandardAlloc::default()); 4];
+/// let thread_count = 4;
+/// let mut output = vec![
+///     0u8;
+///     BrotliEncoderMaxCompressedSizeMulti(input.len(), thread_count)
+/// ];
+/// let mut alloc_per_thread = vec![Some(StandardAlloc::default()); thread_count];
 /// let size = CompressMultiScoped(
 ///     &BrotliEncoderParams::default(),
 ///     &input[..],
@@ -825,6 +831,11 @@ impl ThreadScope for StdThreadScope {
 ///     &StdThreadScope,
 /// ).unwrap();
 /// assert!(size < input.len());
+/// output.truncate(size);
+///
+/// let mut decoded = Vec::new();
+/// BrotliDecompress(&mut output.as_slice(), &mut decoded).unwrap();
+/// assert_eq!(decoded, input);
 /// ```
 #[cfg(feature = "std")]
 pub fn CompressMultiScoped<Alloc: BrotliAlloc + Send + 'static, Scope: ThreadScope>(

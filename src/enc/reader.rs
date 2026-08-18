@@ -62,6 +62,10 @@ impl<R: Read, BufferType: SliceWrapperMut<u8>, Alloc: BrotliAlloc> Read
 }
 
 #[cfg(feature = "std")]
+/// A [`Read`] adapter that yields Brotli-compressed bytes from an inner reader.
+///
+/// Use [`CompressorReader::new`] for the common quality/window interface or
+/// [`CompressorReader::with_params`] for the full encoder configuration.
 pub struct CompressorReader<R: Read>(
     CompressorReaderCustomAlloc<
         R,
@@ -72,6 +76,23 @@ pub struct CompressorReader<R: Read>(
 
 #[cfg(feature = "std")]
 impl<R: Read> CompressorReader<R> {
+    /// Creates a compressing reader.
+    ///
+    /// `q` is the compression quality from 0 through 11 and `lgwin` is the
+    /// base-2 logarithm of the sliding window size. Passing zero for
+    /// `buffer_size` selects the default size of 4096 bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorReader;
+    /// use std::io::Read;
+    ///
+    /// let mut reader = CompressorReader::new(b"some input".as_slice(), 4096, 9, 22);
+    /// let mut compressed = Vec::new();
+    /// reader.read_to_end(&mut compressed).unwrap();
+    /// assert!(!compressed.is_empty());
+    /// ```
     pub fn new(r: R, buffer_size: usize, q: u32, lgwin: u32) -> Self {
         let mut alloc = StandardAlloc::default();
         let buffer = allocate::<u8, _>(
@@ -81,15 +102,63 @@ impl<R: Read> CompressorReader<R> {
         CompressorReader::<R>(CompressorReaderCustomAlloc::new(r, buffer, alloc, q, lgwin))
     }
 
+    /// Creates a compressing reader with the full encoder parameter set.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorReader;
+    /// use simd_brotli::enc::BrotliEncoderParams;
+    /// use std::io::Read;
+    ///
+    /// let mut params = BrotliEncoderParams::default();
+    /// params.quality = 5;
+    /// params.lgwin = 20;
+    /// let mut reader = CompressorReader::with_params(
+    ///     b"parameterized input".as_slice(),
+    ///     4096,
+    ///     &params,
+    /// );
+    /// let mut compressed = Vec::new();
+    /// reader.read_to_end(&mut compressed).unwrap();
+    /// assert!(!compressed.is_empty());
+    /// ```
     pub fn with_params(r: R, buffer_size: usize, params: &BrotliEncoderParams) -> Self {
         let mut reader = Self::new(r, buffer_size, params.quality as u32, params.lgwin as u32);
         (reader.0).0.state.0.params = params.clone();
         reader
     }
 
+    /// Returns a shared reference to the inner reader.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorReader;
+    /// use std::io::Cursor;
+    ///
+    /// let reader = CompressorReader::new(Cursor::new(b"input"), 4096, 9, 22);
+    /// assert_eq!(*reader.get_ref().get_ref(), b"input");
+    /// ```
     pub fn get_ref(&self) -> &R {
         self.0.get_ref()
     }
+
+    /// Consumes the adapter and returns the inner reader.
+    ///
+    /// If the compressed stream has not been read to EOF, compression is not
+    /// completed before the inner reader is returned.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorReader;
+    /// use std::io::Cursor;
+    ///
+    /// let reader = CompressorReader::new(Cursor::new(b"input"), 4096, 9, 22);
+    /// let source = reader.into_inner();
+    /// assert_eq!(source.into_inner(), b"input");
+    /// ```
     pub fn into_inner(self) -> R {
         self.0.into_inner()
     }

@@ -71,6 +71,10 @@ impl<W: Write, BufferType: SliceWrapperMut<u8>, Alloc: BrotliAlloc> Write
 }
 
 #[cfg(feature = "std")]
+/// A [`Write`] adapter that Brotli-compresses bytes into an inner writer.
+///
+/// Call [`CompressorWriter::into_inner`] to finish the Brotli stream and
+/// recover the writer after the last input has been written.
 pub struct CompressorWriter<W: Write>(
     CompressorWriterCustomAlloc<
         W,
@@ -81,6 +85,23 @@ pub struct CompressorWriter<W: Write>(
 
 #[cfg(feature = "std")]
 impl<W: Write> CompressorWriter<W> {
+    /// Creates a compressing writer.
+    ///
+    /// `q` is the compression quality from 0 through 11 and `lgwin` is the
+    /// base-2 logarithm of the sliding window size. Passing zero for
+    /// `buffer_size` selects the default size of 4096 bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorWriter;
+    /// use std::io::Write;
+    ///
+    /// let mut writer = CompressorWriter::new(Vec::new(), 4096, 9, 22);
+    /// writer.write_all(b"some input").unwrap();
+    /// let compressed = writer.into_inner();
+    /// assert!(!compressed.is_empty());
+    /// ```
     pub fn new(w: W, buffer_size: usize, q: u32, lgwin: u32) -> Self {
         let mut alloc = StandardAlloc::default();
         let buffer = allocate::<u8, _>(
@@ -90,18 +111,82 @@ impl<W: Write> CompressorWriter<W> {
         CompressorWriter::<W>(CompressorWriterCustomAlloc::new(w, buffer, alloc, q, lgwin))
     }
 
+    /// Creates a compressing writer with the full encoder parameter set.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorWriter;
+    /// use simd_brotli::enc::BrotliEncoderParams;
+    /// use std::io::Write;
+    ///
+    /// let mut params = BrotliEncoderParams::default();
+    /// params.quality = 5;
+    /// params.lgwin = 20;
+    /// let mut writer = CompressorWriter::with_params(Vec::new(), 4096, &params);
+    /// writer.write_all(b"parameterized input").unwrap();
+    /// let compressed = writer.into_inner();
+    /// assert!(!compressed.is_empty());
+    /// ```
     pub fn with_params(w: W, buffer_size: usize, params: &BrotliEncoderParams) -> Self {
         let mut writer = Self::new(w, buffer_size, params.quality as u32, params.lgwin as u32);
         (writer.0).0.state.params = params.clone();
         writer
     }
 
+    /// Returns a shared reference to the inner writer.
+    ///
+    /// The inner writer may not yet contain the final bytes of the Brotli
+    /// stream. Use [`CompressorWriter::into_inner`] to finish it.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorWriter;
+    ///
+    /// let writer = CompressorWriter::new(Vec::new(), 4096, 9, 22);
+    /// assert!(writer.get_ref().is_empty());
+    /// ```
     pub fn get_ref(&self) -> &W {
         self.0.get_ref()
     }
+
+    /// Returns a mutable reference to the inner writer.
+    ///
+    /// Writing unrelated bytes through this reference would corrupt the
+    /// compressed stream. It can safely be used for operations that do not
+    /// change the writer's logical contents, such as reserving capacity.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::CompressorWriter;
+    ///
+    /// let mut writer = CompressorWriter::new(Vec::new(), 4096, 9, 22);
+    /// writer.get_mut().reserve(1024);
+    /// assert!(writer.get_ref().capacity() >= 1024);
+    /// ```
     pub fn get_mut(&mut self) -> &mut W {
         self.0.get_mut()
     }
+
+    /// Finishes the Brotli stream and returns the inner writer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use simd_brotli::{CompressorWriter, Decompressor};
+    /// use std::io::{Read, Write};
+    ///
+    /// let mut writer = CompressorWriter::new(Vec::new(), 4096, 9, 22);
+    /// writer.write_all(b"round trip").unwrap();
+    /// let compressed = writer.into_inner();
+    ///
+    /// let mut reader = Decompressor::new(compressed.as_slice(), 4096);
+    /// let mut decoded = Vec::new();
+    /// reader.read_to_end(&mut decoded).unwrap();
+    /// assert_eq!(decoded, b"round trip");
+    /// ```
     pub fn into_inner(self) -> W {
         self.0.into_inner()
     }
