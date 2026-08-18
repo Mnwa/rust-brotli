@@ -53,8 +53,8 @@ pub fn BitsEntropyOfSum(a: &[u32], b: &[u32], size: usize) -> floatX {
 
     let mut sum: usize = 0;
     let mut retval: floatX = 0.0;
-    for i in 0..size {
-        let p = a[i].wrapping_add(b[i]) as usize;
+    for (a, b) in a.iter().zip(b).take(size) {
+        let p = a.wrapping_add(*b) as usize;
         sum = sum.wrapping_add(p);
         retval -= p as floatX * FastLog2u16(p as u16);
     }
