@@ -201,19 +201,19 @@ impl Default for StartPosQueue {
 
 impl<AllocF: Allocator<floatX>> ZopfliCostModel<AllocF> {
     fn init(m: &mut AllocF, dist: &BrotliDistanceParams, num_bytes: usize) -> Self {
+        let distance_histogram_size = min(dist.alphabet_size, 544);
         Self {
             num_bytes_: num_bytes,
             cost_cmd_: [0.0; 704],
             min_cost_cmd_: 0.0,
             // FIXME: makes little sense to test if N+2 > 0 -- always true unless wrapping. Perhaps use allocate() instead?
             literal_costs_: alloc_or_default::<floatX, _>(m, num_bytes + 2),
-            // FIXME: possible bug because allocation size is different from the condition
             cost_dist_: alloc_if::<floatX, _>(
-                dist.alphabet_size > 0,
+                distance_histogram_size > 0,
                 m,
-                num_bytes + dist.alphabet_size as usize,
+                distance_histogram_size as usize,
             ),
-            distance_histogram_size: min(dist.alphabet_size, 544),
+            distance_histogram_size,
         }
     }
 

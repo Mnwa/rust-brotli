@@ -1884,17 +1884,18 @@ fn EncodeContextMap<AllocU32: alloc::Allocator<u32>>(
 impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
     fn build_and_store_entropy_codes<HistogramType: SliceWrapper<u32>>(
         &mut self,
-        m: &mut Alloc,
         histograms: &[HistogramType],
         histograms_size: usize,
         alphabet_size: usize,
         tree: &mut [HuffmanTree],
+        depths: &mut [u8],
+        bits: &mut [u16],
         storage_ix: &mut usize,
         storage: &mut [u8],
     ) {
         let table_size: usize = histograms_size.wrapping_mul(self.histogram_length_);
-        self.depths_ = alloc_or_default::<u8, _>(m, table_size);
-        self.bits_ = alloc_or_default::<u16, _>(m, table_size);
+        debug_assert!(depths.len() >= table_size);
+        debug_assert!(bits.len() >= table_size);
         {
             for (i, histogram) in histograms.iter().enumerate().take(histograms_size) {
                 let ix: usize = i.wrapping_mul(self.histogram_length_);
@@ -1903,8 +1904,8 @@ impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
                     self.histogram_length_,
                     alphabet_size,
                     tree,
-                    &mut self.depths_.slice_mut()[ix..],
-                    &mut self.bits_.slice_mut()[ix..],
+                    &mut depths[ix..],
+                    &mut bits[ix..],
                     storage_ix,
                     storage,
                 );
@@ -1912,7 +1913,14 @@ impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
         }
     }
 
-    fn store_symbol(&mut self, symbol: usize, storage_ix: &mut usize, storage: &mut [u8]) {
+    fn store_symbol(
+        &mut self,
+        symbol: usize,
+        depths: &[u8],
+        bits: &[u16],
+        storage_ix: &mut usize,
+        storage: &mut [u8],
+    ) {
         if self.block_len_ == 0usize {
             let block_ix: usize = {
                 self.block_ix_ = self.block_ix_.wrapping_add(1);
@@ -1934,12 +1942,7 @@ impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
         self.block_len_ = self.block_len_.wrapping_sub(1);
         {
             let ix: usize = self.entropy_ix_.wrapping_add(symbol);
-            BrotliWriteBits(
-                self.depths_.slice()[ix],
-                self.bits_.slice()[ix] as (u64),
-                storage_ix,
-                storage,
-            );
+            BrotliWriteBits(depths[ix], bits[ix] as (u64), storage_ix, storage);
         }
     }
 }
@@ -2006,6 +2009,8 @@ impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
         symbol: usize,
         context: usize,
         context_map: &[u32],
+        depths: &[u8],
+        bits: &[u16],
         storage_ix: &mut usize,
         storage: &mut [u8],
         context_bits: usize,
@@ -2034,20 +2039,8 @@ impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
             let ix: usize = histo_ix
                 .wrapping_mul(self.histogram_length_)
                 .wrapping_add(symbol);
-            BrotliWriteBits(
-                self.depths_.slice()[ix],
-                self.bits_.slice()[ix] as (u64),
-                storage_ix,
-                storage,
-            );
+            BrotliWriteBits(depths[ix], bits[ix] as (u64), storage_ix, storage);
         }
-    }
-}
-
-impl<Alloc: Allocator<u8> + Allocator<u16>> BlockEncoder<'_, Alloc> {
-    fn cleanup(&mut self, m: &mut Alloc) {
-        <Alloc as Allocator<u8>>::free_cell(m, core::mem::take(&mut self.depths_));
-        <Alloc as Allocator<u16>>::free_cell(m, core::mem::take(&mut self.bits_));
     }
 }
 
@@ -2185,30 +2178,44 @@ pub(crate) fn store_meta_block<Alloc: BrotliAlloc, Cb>(
             storage,
         );
     }
+    let literal_table_size = mb.literal_histograms_size * BROTLI_NUM_LITERAL_SYMBOLS;
+    let command_table_size = mb.command_histograms_size * BROTLI_NUM_COMMAND_SYMBOLS;
+    let distance_table_size = mb.distance_histograms_size * num_effective_distance_symbols;
+    let table_size = literal_table_size + command_table_size + distance_table_size;
+    let mut depth_tables = alloc_or_default::<u8, _>(alloc, table_size);
+    let mut bit_tables = alloc_or_default::<u16, _>(alloc, table_size);
+    let (literal_depths, other_depths) = depth_tables.slice_mut().split_at_mut(literal_table_size);
+    let (command_depths, distance_depths) = other_depths.split_at_mut(command_table_size);
+    let (literal_bits, other_bits) = bit_tables.slice_mut().split_at_mut(literal_table_size);
+    let (command_bits, distance_bits) = other_bits.split_at_mut(command_table_size);
+
     literal_enc.build_and_store_entropy_codes(
-        alloc,
         mb.literal_histograms.slice(),
         mb.literal_histograms_size,
         BROTLI_NUM_LITERAL_SYMBOLS,
         tree.slice_mut(),
+        literal_depths,
+        literal_bits,
         storage_ix,
         storage,
     );
     command_enc.build_and_store_entropy_codes(
-        alloc,
         mb.command_histograms.slice(),
         mb.command_histograms_size,
         BROTLI_NUM_COMMAND_SYMBOLS,
         tree.slice_mut(),
+        command_depths,
+        command_bits,
         storage_ix,
         storage,
     );
     distance_enc.build_and_store_entropy_codes(
-        alloc,
         mb.distance_histograms.slice(),
         mb.distance_histograms_size,
         num_distance_symbols as usize,
         tree.slice_mut(),
+        distance_depths,
+        distance_bits,
         storage_ix,
         storage,
     );
@@ -2217,14 +2224,20 @@ pub(crate) fn store_meta_block<Alloc: BrotliAlloc, Cb>(
     }
     for cmd in commands.iter().take(n_commands) {
         let cmd_code: usize = cmd.cmd_prefix_ as usize;
-        command_enc.store_symbol(cmd_code, storage_ix, storage);
+        command_enc.store_symbol(cmd_code, command_depths, command_bits, storage_ix, storage);
         StoreCommandExtra(cmd, storage_ix, storage);
         if mb.literal_context_map_size == 0usize {
             let mut j: usize;
             j = cmd.insert_len_ as usize;
             while j != 0usize {
                 {
-                    literal_enc.store_symbol(input[(pos & mask)] as usize, storage_ix, storage);
+                    literal_enc.store_symbol(
+                        input[(pos & mask)] as usize,
+                        literal_depths,
+                        literal_bits,
+                        storage_ix,
+                        storage,
+                    );
                     pos = pos.wrapping_add(1);
                 }
                 j = j.wrapping_sub(1);
@@ -2241,6 +2254,8 @@ pub(crate) fn store_meta_block<Alloc: BrotliAlloc, Cb>(
                         literal as usize,
                         context,
                         mb.literal_context_map.slice(),
+                        literal_depths,
+                        literal_bits,
                         storage_ix,
                         storage,
                         6usize,
@@ -2261,12 +2276,20 @@ pub(crate) fn store_meta_block<Alloc: BrotliAlloc, Cb>(
                 let distnumextra: u32 = u32::from(cmd.dist_prefix_) >> 10; //FIXME: from command
                 let distextra: u64 = cmd.dist_extra_ as (u64);
                 if mb.distance_context_map_size == 0usize {
-                    distance_enc.store_symbol(dist_code, storage_ix, storage);
+                    distance_enc.store_symbol(
+                        dist_code,
+                        distance_depths,
+                        distance_bits,
+                        storage_ix,
+                        storage,
+                    );
                 } else {
                     distance_enc.store_symbol_with_context(
                         dist_code,
                         cmd.distance_context() as usize,
                         mb.distance_context_map.slice(),
+                        distance_depths,
+                        distance_bits,
                         storage_ix,
                         storage,
                         2usize,
@@ -2276,9 +2299,8 @@ pub(crate) fn store_meta_block<Alloc: BrotliAlloc, Cb>(
             }
         }
     }
-    distance_enc.cleanup(alloc);
-    command_enc.cleanup(alloc);
-    literal_enc.cleanup(alloc);
+    <Alloc as Allocator<u8>>::free_cell(alloc, depth_tables);
+    <Alloc as Allocator<u16>>::free_cell(alloc, bit_tables);
     if is_last {
         JumpToByteBoundary(storage_ix, storage);
     }

@@ -43,7 +43,32 @@ pub fn BitsEntropy(population: &[u32], size: usize) -> floatX {
     retval
 }
 
+/// Returns the entropy of the element-wise sum of two populations without
+/// materializing that sum in a temporary histogram.
+#[inline(always)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn BitsEntropyOfSum(a: &[u32], b: &[u32], size: usize) -> floatX {
+    debug_assert!(a.len() >= size);
+    debug_assert!(b.len() >= size);
+
+    let mut sum: usize = 0;
+    let mut retval: floatX = 0.0;
+    for i in 0..size {
+        let p = a[i].wrapping_add(b[i]) as usize;
+        sum = sum.wrapping_add(p);
+        retval -= p as floatX * FastLog2u16(p as u16);
+    }
+    if sum != 0 {
+        retval += sum as floatX * FastLog2(sum as u64);
+    }
+    if retval < sum as floatX {
+        retval = sum as floatX;
+    }
+    retval
+}
+
 #[allow(clippy::excessive_precision)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn CostComputation<T: SliceWrapper<Mem256i>>(
     depth_histo: &mut [u32; BROTLI_CODE_LENGTH_CODES],
     nnz_data: &T,
@@ -396,4 +421,30 @@ fn accumulate_symbol_costs<S: Simd, B: Buckets>(
         }
     }
     max_depth
+}
+
+#[cfg(test)]
+mod test {
+    use super::{BitsEntropy, BitsEntropyOfSum};
+
+    #[test]
+    fn entropy_of_sum_matches_materialized_histogram() {
+        let mut a = [0u32; 257];
+        let mut b = [0u32; 257];
+        for i in 0..a.len() {
+            a[i] = ((i * 17 + i * i) % 251) as u32;
+            b[i] = ((i * 29 + 7) % 193) as u32;
+        }
+
+        for size in [0, 1, 2, 17, 256, 257] {
+            let mut materialized = [0u32; 257];
+            for i in 0..size {
+                materialized[i] = a[i].wrapping_add(b[i]);
+            }
+            assert_eq!(
+                BitsEntropyOfSum(&a, &b, size),
+                BitsEntropy(&materialized, size)
+            );
+        }
+    }
 }

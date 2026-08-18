@@ -1127,6 +1127,8 @@ fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc:
     m: &mut Alloc,
     params: &BrotliEncoderParams,
     ringbuffer_break: Option<core::num::NonZeroUsize>,
+    one_shot: bool,
+    input_size: usize,
 ) -> UnionHasher<Alloc> {
     let hasher_type: i32 = params.hasher.type_;
     if hasher_type == 2i32 {
@@ -1166,7 +1168,13 @@ fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc:
         return UnionHasher::H54(InitializeH54(m, params));
     }
     if hasher_type == 10i32 {
-        return UnionHasher::H10(InitializeH10(m, false, params, ringbuffer_break, 0));
+        return UnionHasher::H10(InitializeH10(
+            m,
+            one_shot,
+            params,
+            ringbuffer_break,
+            input_size,
+        ));
     }
     // since we don't support all of these, fall back to something sane
     InitializeH6(m, params)
@@ -1199,7 +1207,7 @@ pub(crate) fn hasher_setup<Alloc: Allocator<u8> + Allocator<u16> + Allocator<u32
         ChooseHasher(&mut (*params));
         //alloc_size = HasherSize(params, one_shot, input_size);
         //xself = BrotliAllocate(m, alloc_size.wrapping_mul(::core::mem::size_of::<u8>()))
-        *handle = BrotliMakeHasher(m16, params, ringbuffer_break);
+        *handle = BrotliMakeHasher(m16, params, ringbuffer_break, one_shot, input_size);
         handle.GetHasherCommon().params = params.hasher;
         HasherReset(handle); // this sets everything to zero, unlike in C
         handle.GetHasherCommon().is_prepared_ = 1;
@@ -1543,7 +1551,10 @@ pub(crate) fn encoder_compress<
                 ..BrotliEncoderParams::default()
             };
             ChooseHasher(&mut params);
-            s_orig.hasher_ = BrotliMakeHasher(m8, &params, None /*no custom dict */);
+            s_orig.hasher_ = BrotliMakeHasher(
+                m8, &params, None, /* no custom dict */
+                true, input_size,
+            );
         }
         let mut result: bool;
         {
@@ -3141,6 +3152,8 @@ mod test {
     #[cfg(test)]
     use super::{AnyHasher, UnionHasher};
     #[cfg(test)]
+    use crate::alloc::SliceWrapper;
+    #[cfg(test)]
     use alloc_stdlib::StandardAlloc;
     #[cfg(test)]
     use std::vec::Vec;
@@ -3164,6 +3177,23 @@ mod test {
         assert_eq!(large.hasher.type_, 68);
         assert_eq!(large.hasher.block_bits, 5);
         assert_eq!(large.hasher.bucket_bits, 15);
+    }
+
+    #[test]
+    fn quality_eleven_one_shot_hasher_sizes_forest_to_input() {
+        const INPUT_SIZE: usize = 152_089;
+        let mut params = super::BrotliEncoderInitParams();
+        params.quality = 11;
+        params.lgwin = 22;
+        super::ChooseHasher(&mut params);
+
+        let mut alloc = StandardAlloc::default();
+        let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, true, INPUT_SIZE);
+        match &hasher {
+            UnionHasher::H10(h10) => assert_eq!(h10.forest.slice().len(), 2 * INPUT_SIZE),
+            _ => panic!("quality 11 must select H10"),
+        }
+        hasher.free(&mut alloc);
     }
 
     #[test]
@@ -3199,7 +3229,7 @@ mod test {
             params.quality = quality;
             params.hasher.type_ = hasher_type;
             let mut alloc = StandardAlloc::default();
-            let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None);
+            let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, false, 0);
             assert!(matches!(
                 (&hasher, hasher_type),
                 (UnionHasher::H40(_), 40) | (UnionHasher::H41(_), 41) | (UnionHasher::H42(_), 42)

@@ -310,6 +310,10 @@ cargo run --release --features hotpath-cpu --bin brotli -- -c -q11 input.bin /de
 
 # Allocation counts and bytes
 cargo run --release --features hotpath-alloc --bin brotli -- -c -q11 input.bin /dev/null
+
+# Rank stages by allocation count instead of allocated bytes
+HOTPATH_ALLOC_METRIC=count cargo run --release --features hotpath-alloc --bin brotli -- \
+  -c -q11 input.bin /dev/null
 ```
 
 The report is printed when the process exits. Set `HOTPATH_OUTPUT_FORMAT=json-pretty` for the full

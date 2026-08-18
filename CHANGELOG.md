@@ -1,5 +1,52 @@
 # Changelog
 
+## 10.0.1
+
+Reduces encoder allocation count and cumulative allocation volume without adding a custom
+allocator or changing the allocator API. Compressed output remains byte-identical to 10.0.0, and
+the MSRV remains 1.89.0.
+
+### Allocation count
+
+- Context-aware block splitting computes the entropy of two added histograms directly instead of
+  allocating and materializing a temporary combined histogram.
+- Block splitting, histogram clustering and meta-block serialization now coalesce compatible
+  temporary arrays into shared backing allocations and reuse scratch storage between command and
+  distance passes.
+- On `testdata/alice29.txt` at q11, the user-facing CLI invocation drops from 108 to 84 allocation
+  calls: **22.2% fewer allocations**. Excluding the CLI's 19 calls, encoder allocation count drops
+  from 89 to 65, or **27.0%**.
+
+### Allocation volume
+
+- H10 now receives the actual one-shot flag and input length when it is first constructed. Its
+  binary-tree forest is therefore sized to the input when the complete stream is available,
+  instead of always reserving two entries for every position in the full Brotli window. This
+  matches Google Brotli's one-shot allocation algorithm while retaining full-window storage for
+  streaming inputs.
+- The q11 Zopfli distance-cost table is allocated for the effective distance alphabet, at most 544
+  floats, rather than unnecessarily including one float for every input byte.
+- On `testdata/alice29.txt` at q11, cumulative allocated storage reported by `hotpath-alloc` drops
+  from 52.9 MB to 21.4 MB: **31.5 MB, or 59.5%, less allocation traffic**. The encoder setup portion
+  falls from 34.5 MB to 3.7 MB.
+
+### Entropy-cost profiling
+
+- Added `hotpath` measurements for `BitsEntropyOfSum` and the feature-gated `CostComputation` path.
+  The standard configuration already uses the existing 16-lane SIMD histogram occupancy scan;
+  indexed log-table lookups remain scalar to preserve accumulation order and exact output.
+- `README.md` now documents allocation-byte and allocation-count profiling separately, including
+  `HOTPATH_ALLOC_METRIC=count` and JSON output.
+
+### Performance and verification
+
+On Apple Silicon, an uninstrumented 50-run release benchmark of `testdata/alice29.txt` at q11
+improved from 85.1 ms to 84.3 ms, approximately **0.9% less wall time**. The resulting stream is
+byte-identical to 10.0.0; `testdata/random_then_unicode` is also byte-identical.
+
+The complete library, binary, example and integration-test suite passes, as do formatting, strict
+Clippy, `no-default-features`, `hotpath-alloc` and `vector_scratch_space` configurations.
+
 ## 10.0.0
 
 Reduces match-finding overhead by detecting the available SIMD level once at the encoder's outer

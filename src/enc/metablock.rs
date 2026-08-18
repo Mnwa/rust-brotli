@@ -4,7 +4,7 @@ use core::cmp::{max, min};
 use super::super::alloc;
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::backward_references::BrotliEncoderParams;
-use super::bit_cost::{BitsEntropy, BrotliPopulationCost};
+use super::bit_cost::{BitsEntropy, BitsEntropyOfSum, BrotliPopulationCost};
 use super::block_split::BlockSplit;
 use super::block_splitter::BrotliSplitBlock;
 use super::brotli_bit_stream::MetaBlockSplit;
@@ -654,12 +654,9 @@ fn BlockSplitterFinishBlock<
 }
 const BROTLI_MAX_STATIC_CONTEXTS: usize = 13;
 
-fn ContextBlockSplitterFinishBlock<
-    Alloc: alloc::Allocator<u8> + alloc::Allocator<u32> + alloc::Allocator<HistogramLiteral>,
-    AllocHL: alloc::Allocator<HistogramLiteral>,
->(
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn ContextBlockSplitterFinishBlock<Alloc: alloc::Allocator<u8> + alloc::Allocator<u32>>(
     xself: &mut ContextBlockSplitter,
-    m: &mut AllocHL,
     split: &mut BlockSplit<Alloc>,
     histograms: &mut [HistogramLiteral],
     histograms_size: &mut usize,
@@ -688,28 +685,20 @@ fn ContextBlockSplitterFinishBlock<
         xself.block_size_ = 0usize;
     } else if xself.block_size_ > 0usize {
         let mut entropy = [0.0; BROTLI_MAX_STATIC_CONTEXTS];
-        let mut combined_histo = m.alloc_cell(2 * num_contexts);
         let mut combined_entropy = [0.0; 2 * BROTLI_MAX_STATIC_CONTEXTS];
         let mut diff = [0.0; 2];
         for (i, entropy) in entropy.iter_mut().enumerate().take(num_contexts) {
             let curr_histo_ix: usize = xself.curr_histogram_ix_.wrapping_add(i);
-            let mut j: usize;
             *entropy = BitsEntropy((histograms[curr_histo_ix]).slice(), xself.alphabet_size_);
-            j = 0usize;
-            while j < 2usize {
-                {
-                    let jx: usize = j.wrapping_mul(num_contexts).wrapping_add(i);
-                    let last_histogram_ix: usize = xself.last_histogram_ix_[j].wrapping_add(i);
-                    combined_histo.slice_mut()[jx] = histograms[curr_histo_ix].clone();
-                    HistogramAddHistogram(
-                        &mut combined_histo.slice_mut()[jx],
-                        &histograms[last_histogram_ix],
-                    );
-                    combined_entropy[jx] =
-                        BitsEntropy(combined_histo.slice()[jx].slice(), xself.alphabet_size_);
-                    diff[j] += combined_entropy[jx] - *entropy - xself.last_entropy_[jx];
-                }
-                j = j.wrapping_add(1);
+            for (j, diff) in diff.iter_mut().enumerate() {
+                let jx: usize = j.wrapping_mul(num_contexts).wrapping_add(i);
+                let last_histogram_ix: usize = xself.last_histogram_ix_[j].wrapping_add(i);
+                combined_entropy[jx] = BitsEntropyOfSum(
+                    histograms[curr_histo_ix].slice(),
+                    histograms[last_histogram_ix].slice(),
+                    xself.alphabet_size_,
+                );
+                *diff += combined_entropy[jx] - *entropy - xself.last_entropy_[jx];
             }
         }
         if split.num_types < xself.max_block_types_
@@ -745,11 +734,13 @@ fn ContextBlockSplitterFinishBlock<
                 xself.last_histogram_ix_.swap(0, 1);
             }
             for i in 0usize..num_contexts {
-                histograms[xself.last_histogram_ix_[0].wrapping_add(i)] =
-                    combined_histo.slice()[num_contexts.wrapping_add(i)].clone();
+                let curr_histo_ix = xself.curr_histogram_ix_.wrapping_add(i);
+                let last_histo_ix = xself.last_histogram_ix_[0].wrapping_add(i);
+                let current = histograms[curr_histo_ix].clone();
+                HistogramAddHistogram(&mut histograms[last_histo_ix], &current);
                 xself.last_entropy_[num_contexts.wrapping_add(i)] = xself.last_entropy_[i];
                 xself.last_entropy_[i] = combined_entropy[num_contexts.wrapping_add(i)];
-                HistogramClear(&mut histograms[xself.curr_histogram_ix_.wrapping_add(i)]);
+                HistogramClear(&mut histograms[curr_histo_ix]);
             }
             xself.num_blocks_ = xself.num_blocks_.wrapping_add(1);
             xself.block_size_ = 0usize;
@@ -762,14 +753,16 @@ fn ContextBlockSplitterFinishBlock<
                 let old_split_length = *_lhs;
                 *_lhs = old_split_length.wrapping_add(_rhs);
             }
-            for i in 0usize..num_contexts {
-                histograms[xself.last_histogram_ix_[0].wrapping_add(i)] =
-                    combined_histo.slice()[i].clone();
-                xself.last_entropy_[i] = combined_entropy[i];
+            for (i, &combined_entropy) in combined_entropy.iter().enumerate().take(num_contexts) {
+                let curr_histo_ix = xself.curr_histogram_ix_.wrapping_add(i);
+                let last_histo_ix = xself.last_histogram_ix_[0].wrapping_add(i);
+                let current = histograms[curr_histo_ix].clone();
+                HistogramAddHistogram(&mut histograms[last_histo_ix], &current);
+                xself.last_entropy_[i] = combined_entropy;
                 if split.num_types == 1 {
                     xself.last_entropy_[num_contexts.wrapping_add(i)] = xself.last_entropy_[i];
                 }
-                HistogramClear(&mut histograms[xself.curr_histogram_ix_.wrapping_add(i)]);
+                HistogramClear(&mut histograms[curr_histo_ix]);
             }
             xself.block_size_ = 0usize;
             if {
@@ -781,7 +774,6 @@ fn ContextBlockSplitterFinishBlock<
                     xself.target_block_size_.wrapping_add(xself.min_block_size_);
             }
         }
-        m.free_cell(combined_histo);
     }
     if is_final {
         *histograms_size = split.num_types.wrapping_mul(num_contexts);
@@ -806,11 +798,8 @@ fn BlockSplitterAddSymbol<
     }
 }
 
-fn ContextBlockSplitterAddSymbol<
-    Alloc: alloc::Allocator<u8> + alloc::Allocator<u32> + alloc::Allocator<HistogramLiteral>,
->(
+fn ContextBlockSplitterAddSymbol<Alloc: alloc::Allocator<u8> + alloc::Allocator<u32>>(
     xself: &mut ContextBlockSplitter,
-    m: &mut Alloc,
     split: &mut BlockSplit<Alloc>,
     histograms: &mut [HistogramLiteral],
     histograms_size: &mut usize,
@@ -823,7 +812,7 @@ fn ContextBlockSplitterAddSymbol<
     );
     xself.block_size_ = xself.block_size_.wrapping_add(1);
     if xself.block_size_ == xself.target_block_size_ {
-        ContextBlockSplitterFinishBlock(xself, m, split, histograms, histograms_size, false);
+        ContextBlockSplitterFinishBlock(xself, split, histograms, histograms_size, false);
     }
 }
 
@@ -951,7 +940,6 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
                             Context(prev_byte, prev_byte2, literal_context_mode) as usize;
                         ContextBlockSplitterAddSymbol(
                             lit_blocks_ctx,
-                            alloc,
                             &mut mb.literal_split,
                             mb.literal_histograms.slice_mut(),
                             &mut mb.literal_histograms_size,
@@ -991,7 +979,6 @@ pub fn BrotliBuildMetaBlockGreedyInternal<
         ),
         LitBlocks::ctx(ref mut lit_blocks_ctx) => ContextBlockSplitterFinishBlock(
             lit_blocks_ctx,
-            alloc,
             &mut mb.literal_split,
             mb.literal_histograms.slice_mut(),
             &mut mb.literal_histograms_size,
