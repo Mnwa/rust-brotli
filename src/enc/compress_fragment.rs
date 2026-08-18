@@ -14,11 +14,12 @@ use super::entropy_encode::{
     BrotliConvertBitDepthsToSymbols, BrotliCreateHuffmanTree, HuffmanTree,
 };
 use super::static_dict::{
-    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, FindMatchLengthWithLimit,
+    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, FindMatchLengthWithLimitAtLevel,
 };
 use super::util::{FastLog2, Log2FloorNonZero};
 use crate::enc::compress_fragment_two_pass::store_meta_block_header;
 use crate::enc::floatX;
+use crate::enc::vectorization::detect_level;
 
 //static kHashMul32: u32 = 0x1e35a7bdu32;
 
@@ -662,6 +663,7 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
+    let level = detect_level();
     let mut cmd_histo = [0u32; 128];
     let mut ip_end = 0usize;
     let mut next_emit = 0usize;
@@ -766,7 +768,8 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
                     }
 
                     let base: usize = ip_index;
-                    let matched = (5usize).wrapping_add(FindMatchLengthWithLimit(
+                    let matched = (5usize).wrapping_add(FindMatchLengthWithLimitAtLevel(
+                        level,
                         &input_ptr[candidate + 5..],
                         &input_ptr[ip_index + 5..],
                         ip_end.wrapping_sub(ip_index).wrapping_sub(5),
@@ -872,11 +875,13 @@ fn compress_fragment_fast_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
 
                     while IsMatch(&input_ptr[ip_index..], &input_ptr[candidate..]) {
                         let base: usize = ip_index;
-                        let matched: usize = (5usize).wrapping_add(FindMatchLengthWithLimit(
-                            &input_ptr[candidate + 5..],
-                            &input_ptr[ip_index + 5..],
-                            ip_end.wrapping_sub(ip_index).wrapping_sub(5),
-                        ));
+                        let matched: usize =
+                            (5usize).wrapping_add(FindMatchLengthWithLimitAtLevel(
+                                level,
+                                &input_ptr[candidate + 5..],
+                                &input_ptr[ip_index + 5..],
+                                ip_end.wrapping_sub(ip_index).wrapping_sub(5),
+                            ));
                         if ip_index.wrapping_sub(candidate) > (1usize << 18).wrapping_sub(16) {
                             break;
                         }

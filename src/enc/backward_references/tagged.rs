@@ -1,11 +1,11 @@
-use fearless_simd::{Simd, SimdBase, SimdMask, u8x16, u8x32};
+use fearless_simd::{Level, Simd, SimdBase, SimdMask, u8x16, u8x32};
 
 use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use crate::enc::combined_alloc::allocate;
 use crate::enc::static_dict::{
-    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BrotliDictionary, FindMatchLengthWithLimit,
+    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BrotliDictionary,
+    FindMatchLengthWithLimitSimd,
 };
-use crate::enc::vectorization::detect_level;
 
 use super::{
     AnyHasher, BackwardReferencePenaltyUsingLastDistance, BackwardReferenceScore,
@@ -186,6 +186,7 @@ impl<
     fn find_longest_match_simd<S: Simd>(
         &mut self,
         simd: S,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -221,7 +222,8 @@ impl<
             {
                 continue;
             }
-            let unbroken_len = FindMatchLengthWithLimit(&data[prev_ix..], cur_data, max_length);
+            let unbroken_len =
+                FindMatchLengthWithLimitSimd(simd, &data[prev_ix..], cur_data, max_length);
             if unbroken_len >= 3 || (unbroken_len == 2 && i < 2) {
                 let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
                 let mut score = BackwardReferenceScoreUsingLastDistance(len, self.h9_opts);
@@ -283,9 +285,14 @@ impl<
                 if BROTLI_UNALIGNED_LOAD32(cur_data) != BROTLI_UNALIGNED_LOAD32(&data[prev_ix..]) {
                     continue;
                 }
-                FindMatchLengthWithLimit(&data[prev_ix + 4..], &cur_data[4..], max_length - 4) + 4
+                FindMatchLengthWithLimitSimd(
+                    simd,
+                    &data[prev_ix + 4..],
+                    &cur_data[4..],
+                    max_length - 4,
+                ) + 4
             } else {
-                FindMatchLengthWithLimit(&data[prev_ix..], cur_data, max_length)
+                FindMatchLengthWithLimitSimd(simd, &data[prev_ix..], cur_data, max_length)
             };
             if unbroken_len >= 4 {
                 let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
@@ -308,6 +315,7 @@ impl<
 
         if min_score == out.score && dictionary.is_some() {
             is_match_found = SearchInStaticDictionary(
+                level,
                 dictionary.unwrap(),
                 dictionary_hash,
                 self,
@@ -386,8 +394,9 @@ impl<
         );
     }
 
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -401,8 +410,8 @@ impl<
         max_distance: usize,
         out: &mut HasherSearchResult,
     ) -> bool {
-        dispatch!(detect_level(), simd => self.find_longest_match_simd(
-            simd, dictionary, dictionary_hash, data, ring_buffer_mask, ring_buffer_break,
+        dispatch!(level, simd => self.find_longest_match_simd(
+            simd, level, dictionary, dictionary_hash, data, ring_buffer_mask, ring_buffer_break,
             distance_cache, cur_ix, max_length, max_backward, gap, max_distance, out
         ))
     }
@@ -497,8 +506,9 @@ where
     fn PrepareDistanceCache(&self, distance_cache: &mut [i32]) {
         self.hasher.PrepareDistanceCache(distance_cache)
     }
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -514,6 +524,7 @@ where
     ) -> bool {
         self.hasher.find_longest_match_simd(
             self.simd,
+            level,
             dictionary,
             dictionary_hash,
             data,
@@ -571,6 +582,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enc::vectorization::detect_level;
 
     #[test]
     fn matching_tag_mask_rotates_newest_candidate_to_bit_zero() {

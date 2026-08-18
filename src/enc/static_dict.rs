@@ -1,5 +1,5 @@
 use core::cmp::{max, min};
-use fearless_simd::{Simd, SimdBase, SimdMask, u8x32};
+use fearless_simd::{Level, Simd, SimdBase, SimdMask, u8x32};
 
 pub const kNumDistanceCacheEntries: usize = 4;
 
@@ -125,29 +125,44 @@ pub fn SlowerFindMatchLengthWithLimit(s1: &[u8], s2: &[u8], limit: usize) -> usi
 }
 /// Length of the common prefix of `s1` and `s2`, capped at `limit`.
 ///
-/// Resolves short matches -- almost all of them -- without ever looking at the CPU's
-/// feature set, and only detects an instruction set once a match has proven long enough
-/// for wide compares to pay for that detection. Callers that already hold an instruction
-/// set should use [`FindMatchLengthWithLimitSimd`].
+/// Resolves short matches -- almost all of them -- without dispatching on the caller-provided
+/// instruction set. Wide dispatch only happens once a match is long enough to benefit from it.
+/// Callers that already hold a SIMD token should use [`FindMatchLengthWithLimitSimd`].
 #[allow(unused)]
 #[inline]
 pub fn FindMatchLengthWithLimit(s1: &[u8], s2: &[u8], limit: usize) -> usize {
+    FindMatchLengthWithLimitAtLevel(detect_level(), s1, s2, limit)
+}
+
+#[inline]
+pub(crate) fn FindMatchLengthWithLimitAtLevel(
+    level: Level,
+    s1: &[u8],
+    s2: &[u8],
+    limit: usize,
+) -> usize {
     let s1 = &s1[..limit];
     let s2 = &s2[..limit];
     match narrow_common_prefix(s1, s2, limit) {
         Ok(len) => len,
         Err(matched) => {
-            matched + detect_and_wide_common_prefix(&s1[matched..], &s2[matched..], limit - matched)
+            matched
+                + wide_common_prefix_for_level(
+                    level,
+                    &s1[matched..],
+                    &s2[matched..],
+                    limit - matched,
+                )
         }
     }
 }
 
 /// Kept out of line so the caller only inlines the first stage, which is the one the
 /// match finders run millions of times. Reaching here means the match has already run
-/// [`WIDE_COMPARE_THRESHOLD`] bytes, which is long enough to absorb a CPU probe.
+/// [`WIDE_COMPARE_THRESHOLD`] bytes, which is long enough to absorb SIMD dispatch.
 #[inline(never)]
-fn detect_and_wide_common_prefix(s1: &[u8], s2: &[u8], limit: usize) -> usize {
-    dispatch!(detect_level(), simd => wide_common_prefix(simd, s1, s2, limit))
+fn wide_common_prefix_for_level(level: Level, s1: &[u8], s2: &[u8], limit: usize) -> usize {
+    dispatch!(level, simd => wide_common_prefix(simd, s1, s2, limit))
 }
 
 /// [`FindMatchLengthWithLimit`] on an already-detected instruction set.
@@ -370,6 +385,16 @@ pub fn slowFindMatchLengthWithLimit(s1: &[u8], s2: &[u8], limit: usize) -> usize
 }
 
 pub fn IsMatch(dictionary: &BrotliDictionary, w: DictWord, data: &[u8], max_length: usize) -> i32 {
+    IsMatchAtLevel(detect_level(), dictionary, w, data, max_length)
+}
+
+fn IsMatchAtLevel(
+    level: Level,
+    dictionary: &BrotliDictionary,
+    w: DictWord,
+    data: &[u8],
+    max_length: usize,
+) -> i32 {
     if w.l as usize > max_length {
         0
     } else {
@@ -377,7 +402,7 @@ pub fn IsMatch(dictionary: &BrotliDictionary, w: DictWord, data: &[u8], max_leng
             .wrapping_add((w.len() as usize).wrapping_mul(w.idx() as usize));
         let dict = &dictionary.data.split_at(offset).1;
         if w.transform() as i32 == 0i32 {
-            if FindMatchLengthWithLimit(dict, data, w.l as usize) == w.l as usize {
+            if FindMatchLengthWithLimitAtLevel(level, dict, data, w.l as usize) == w.l as usize {
                 1
             } else {
                 0
@@ -386,7 +411,8 @@ pub fn IsMatch(dictionary: &BrotliDictionary, w: DictWord, data: &[u8], max_leng
             if dict[0] as i32 >= b'a' as i32
                 && (dict[0] as i32 <= b'z' as i32)
                 && (dict[0] as i32 ^ 32i32 == data[0] as i32)
-                && (FindMatchLengthWithLimit(
+                && (FindMatchLengthWithLimitAtLevel(
+                    level,
                     dict.split_at(1).1,
                     data.split_at(1).1,
                     (w.len() as u32).wrapping_sub(1) as usize,
@@ -419,6 +445,7 @@ fn AddMatch(distance: usize, len: usize, len_code: usize, mut matches: &mut [u32
 
 #[allow(unused)]
 fn DictMatchLength(
+    level: Level,
     dictionary: &BrotliDictionary,
     data: &[u8],
     id: usize,
@@ -427,11 +454,35 @@ fn DictMatchLength(
 ) -> usize {
     let offset: usize =
         (dictionary.offsets_by_length[len] as usize).wrapping_add(len.wrapping_mul(id));
-    FindMatchLengthWithLimit(dictionary.data.split_at(offset).1, data, min(len, maxlen))
+    FindMatchLengthWithLimitAtLevel(
+        level,
+        dictionary.data.split_at(offset).1,
+        data,
+        min(len, maxlen),
+    )
 }
 
 #[allow(unused)]
 pub fn BrotliFindAllStaticDictionaryMatches(
+    dictionary: &BrotliDictionary,
+    data: &[u8],
+    min_length: usize,
+    max_length: usize,
+    matches: &mut [u32],
+) -> i32 {
+    BrotliFindAllStaticDictionaryMatchesAtLevel(
+        detect_level(),
+        dictionary,
+        data,
+        min_length,
+        max_length,
+        matches,
+    )
+}
+
+#[allow(unused)]
+pub(crate) fn BrotliFindAllStaticDictionaryMatchesAtLevel(
+    level: Level,
     dictionary: &BrotliDictionary,
     data: &[u8],
     min_length: usize,
@@ -451,7 +502,7 @@ pub fn BrotliFindAllStaticDictionaryMatches(
             end = !(w.len() as i32 & 0x80i32 == 0) as i32;
             w.l = l as u8;
             if w.transform() as i32 == 0i32 {
-                let matchlen: usize = DictMatchLength(dictionary, data, id, l, max_length);
+                let matchlen: usize = DictMatchLength(level, dictionary, data, id, l, max_length);
 
                 let mut minlen: usize;
 
@@ -945,7 +996,7 @@ pub fn BrotliFindAllStaticDictionaryMatches(
             } else {
                 let is_all_caps = w.transform() != kUppercaseFirst;
 
-                if IsMatch(dictionary, w, data, max_length) == 0 {
+                if IsMatchAtLevel(level, dictionary, w, data, max_length) == 0 {
                     continue;
                 }
                 //eprint!("AVdding match {} {} {} {}\n", w.len(), w.transform(), w.idx(), 666);
@@ -1093,7 +1144,8 @@ pub fn BrotliFindAllStaticDictionaryMatches(
             end = !(w.len() as i32 & 0x80i32 == 0) as i32;
             w.l = l as u8;
             if w.transform() as i32 == 0i32 {
-                if IsMatch(
+                if IsMatchAtLevel(
+                    level,
                     dictionary,
                     w,
                     data.split_at(1).1,
@@ -1188,7 +1240,8 @@ pub fn BrotliFindAllStaticDictionaryMatches(
             } else if is_space {
                 let is_all_caps = w.transform() != kUppercaseFirst;
 
-                if IsMatch(
+                if IsMatchAtLevel(
+                    level,
                     dictionary,
                     w,
                     data.split_at(1).1,
@@ -1306,7 +1359,8 @@ pub fn BrotliFindAllStaticDictionaryMatches(
             end = !(w.len() as i32 & 0x80i32 == 0) as i32;
             w.l = l as u8;
             if w.transform() as i32 == 0i32
-                && (IsMatch(
+                && (IsMatchAtLevel(
+                    level,
                     dictionary,
                     w,
                     data.split_at(2).1,
@@ -1368,7 +1422,8 @@ pub fn BrotliFindAllStaticDictionaryMatches(
             end = !(w.len() as i32 & 0x80i32 == 0) as i32;
             w.l = l as u8;
             if w.transform() as i32 == 0i32
-                && (IsMatch(
+                && (IsMatchAtLevel(
+                    level,
                     dictionary,
                     w,
                     data.split_at(5).1,

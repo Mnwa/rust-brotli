@@ -2,7 +2,7 @@ use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core;
 use core::cmp::min;
 
-use fearless_simd::Simd;
+use fearless_simd::{Level, Simd};
 
 use super::{
     AnyHasher, BrotliEncoderParams, CloneWithAlloc, H9Opts, HasherSearchResult, HowPrepared,
@@ -370,8 +370,9 @@ where
         HowPrepared::NEWLY_PREPARED
     }
 
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        _level: Level,
         _dictionary: Option<&BrotliDictionary>,
         _dictionary_hash: &[u16],
         _data: &[u8],

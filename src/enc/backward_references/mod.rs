@@ -5,14 +5,15 @@ mod tagged;
 mod test;
 
 use core::cmp::{max, min};
+use fearless_simd::Level;
 
 use super::super::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use super::command::{BrotliDistanceParams, Command, ComputeDistanceCode};
 use super::dictionary_hash::kStaticDictionaryHash;
 use super::hash_to_binary_tree::{H10, H10Buckets, H10DefaultParams, ZopfliNode};
 use super::static_dict::{
-    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BrotliDictionary, FindMatchLengthWithLimit,
-    FindMatchLengthWithLimitMin4,
+    BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BrotliDictionary,
+    FindMatchLengthWithLimitAtLevel, FindMatchLengthWithLimitMin4,
 };
 use super::util::{Log2FloorNonZero, floatX};
 use crate::enc::combined_alloc::allocate;
@@ -187,7 +188,55 @@ pub trait AnyHasher {
         gap: usize,
         max_distance: usize,
         out: &mut HasherSearchResult,
-    ) -> bool;
+    ) -> bool {
+        self.FindLongestMatchWithLevel(
+            detect_level(),
+            dictionary,
+            dictionary_hash,
+            data,
+            ring_buffer_mask,
+            ring_buffer_break,
+            distance_cache,
+            cur_ix,
+            max_length,
+            max_backward,
+            gap,
+            max_distance,
+            out,
+        )
+    }
+    #[doc(hidden)]
+    fn FindLongestMatchWithLevel(
+        &mut self,
+        _level: Level,
+        dictionary: Option<&BrotliDictionary>,
+        dictionary_hash: &[u16],
+        data: &[u8],
+        ring_buffer_mask: usize,
+        ring_buffer_break: Option<core::num::NonZeroUsize>,
+        distance_cache: &[i32],
+        cur_ix: usize,
+        max_length: usize,
+        max_backward: usize,
+        gap: usize,
+        max_distance: usize,
+        out: &mut HasherSearchResult,
+    ) -> bool {
+        self.FindLongestMatch(
+            dictionary,
+            dictionary_hash,
+            data,
+            ring_buffer_mask,
+            ring_buffer_break,
+            distance_cache,
+            cur_ix,
+            max_length,
+            max_backward,
+            gap,
+            max_distance,
+            out,
+        )
+    }
     fn Store(&mut self, data: &[u8], mask: usize, ix: usize);
     fn Store4Vec4(&mut self, data: &[u8], mask: usize, ix: usize) {
         for i in 0..4 {
@@ -358,8 +407,9 @@ impl<T: SliceWrapperMut<u32> + SliceWrapper<u32> + BasicHashComputer> AnyHasher 
         HowPrepared::NEWLY_PREPARED
     }
 
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -468,6 +518,7 @@ impl<T: SliceWrapperMut<u32> + SliceWrapper<u32> + BasicHashComputer> AnyHasher 
         }
         if dictionary.is_some() && self.buckets_.USE_DICTIONARY() != 0 && !is_match_found {
             is_match_found = SearchInStaticDictionary(
+                level,
                 dictionary.unwrap(),
                 dictionary_hash,
                 self,
@@ -738,8 +789,9 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
         let num_distances = H9_NUM_LAST_DISTANCES_TO_CHECK as i32;
         adv_prepare_distance_cache(distance_cache, num_distances);
     }
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -779,8 +831,12 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
                 continue;
             }
             {
-                let unbroken_len: usize =
-                    FindMatchLengthWithLimit(&data[prev_ix..], &data[cur_ix_masked..], max_length);
+                let unbroken_len: usize = FindMatchLengthWithLimitAtLevel(
+                    level,
+                    &data[prev_ix..],
+                    &data[cur_ix_masked..],
+                    max_length,
+                );
                 if unbroken_len >= 3 || (unbroken_len == 2 && i < 2) {
                     let len =
                         fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
@@ -829,7 +885,8 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
                     continue;
                 }
                 {
-                    let unbroken_len = FindMatchLengthWithLimit(
+                    let unbroken_len = FindMatchLengthWithLimitAtLevel(
+                        level,
                         data.split_at(prev_ix).1,
                         data.split_at(cur_ix_masked).1,
                         max_length,
@@ -866,6 +923,7 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
         if !is_match_found && dictionary.is_some() {
             let (_, cur_data) = data.split_at(cur_ix_masked);
             is_match_found = SearchInStaticDictionary(
+                level,
                 dictionary.unwrap(),
                 dictionary_hash,
                 self,
@@ -1686,8 +1744,9 @@ impl<
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -1724,7 +1783,8 @@ impl<
             }
             let prev_data = data.split_at(prev_ix).1;
 
-            let unbroken_len = FindMatchLengthWithLimit(prev_data, cur_data, max_length);
+            let unbroken_len =
+                FindMatchLengthWithLimitAtLevel(level, prev_data, cur_data, max_length);
             if unbroken_len >= 3 || (unbroken_len == 2 && i < 2) {
                 let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
                 let mut score: u64 = BackwardReferenceScoreUsingLastDistance(len, opts);
@@ -1802,6 +1862,7 @@ impl<
         if !is_match_found && dictionary.is_some() {
             let (_, cur_data) = data.split_at(cur_ix_masked);
             is_match_found = SearchInStaticDictionary(
+                level,
                 dictionary.unwrap(),
                 dictionary_hash,
                 self,
@@ -1957,8 +2018,9 @@ impl<
         adv_prepare_distance_cache(distance_cache, NUM_LAST_DISTANCES_TO_CHECK as i32);
     }
 
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -1996,7 +2058,8 @@ impl<
                 continue;
             }
             prev_ix &= ring_buffer_mask;
-            let unbroken_len = FindMatchLengthWithLimit(&data[prev_ix..], cur_data, max_length);
+            let unbroken_len =
+                FindMatchLengthWithLimitAtLevel(level, &data[prev_ix..], cur_data, max_length);
             if unbroken_len >= 2 {
                 let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
                 let mut score = BackwardReferenceScoreUsingLastDistance(len, self.h9_opts);
@@ -2038,7 +2101,8 @@ impl<
             {
                 continue;
             }
-            let unbroken_len = FindMatchLengthWithLimit(&data[prev_ix..], cur_data, max_length);
+            let unbroken_len =
+                FindMatchLengthWithLimitAtLevel(level, &data[prev_ix..], cur_data, max_length);
             if unbroken_len >= 4 {
                 let len = fix_unbroken_len(unbroken_len, prev_ix, cur_ix_masked, ring_buffer_break);
                 let score = BackwardReferenceScore(len, backward, self.h9_opts);
@@ -2056,6 +2120,7 @@ impl<
         let mut found = out.score != min_score;
         if !found && dictionary.is_some() {
             found = SearchInStaticDictionary(
+                level,
                 dictionary.unwrap(),
                 dictionary_hash,
                 self,
@@ -2141,6 +2206,7 @@ fn Hash14(data: &[u8]) -> u32 {
 }
 
 fn TestStaticDictionaryItem(
+    level: Level,
     dictionary: &BrotliDictionary,
     item: usize,
     data: &[u8],
@@ -2159,7 +2225,8 @@ fn TestStaticDictionaryItem(
     if len > max_length {
         return 0i32;
     }
-    let matchlen: usize = FindMatchLengthWithLimit(data, &dictionary.data[offset..], len);
+    let matchlen: usize =
+        FindMatchLengthWithLimitAtLevel(level, data, &dictionary.data[offset..], len);
     if matchlen.wrapping_add(kCutoffTransformsCount as usize) <= len || matchlen == 0usize {
         return 0i32;
     }
@@ -2187,6 +2254,7 @@ fn TestStaticDictionaryItem(
 }
 
 fn SearchInStaticDictionary<HasherType: AnyHasher>(
+    level: Level,
     dictionary: &BrotliDictionary,
     dictionary_hash: &[u16],
     handle: &mut HasherType,
@@ -2213,6 +2281,7 @@ fn SearchInStaticDictionary<HasherType: AnyHasher>(
             xself.dict_num_lookups = xself.dict_num_lookups.wrapping_add(1);
             if item != 0usize {
                 let item_matches: i32 = TestStaticDictionaryItem(
+                    level,
                     dictionary,
                     item,
                     data,
@@ -2578,8 +2647,9 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
             ringbuffer_mask
         )
     }
-    fn FindLongestMatch(
+    fn FindLongestMatchWithLevel(
         &mut self,
+        level: Level,
         dictionary: Option<&BrotliDictionary>,
         dictionary_hash: &[u16],
         data: &[u8],
@@ -2595,7 +2665,8 @@ impl<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>
     ) -> bool {
         match_all_hashers_mut!(
             self,
-            FindLongestMatch,
+            FindLongestMatchWithLevel,
+            level,
             dictionary,
             dictionary_hash,
             data,
@@ -2717,6 +2788,7 @@ buckets_:[0;65537],
 })
 */
 fn CreateBackwardReferences<AH: AnyHasher>(
+    level: Level,
     dictionary: Option<&BrotliDictionary>,
     dictionary_hash: &[u16],
     num_bytes: usize,
@@ -2764,7 +2836,8 @@ fn CreateBackwardReferences<AH: AnyHasher>(
         sr.len_x_code = 0usize;
         sr.distance = 0usize;
         sr.score = kMinScore;
-        if hasher.FindLongestMatch(
+        if hasher.FindLongestMatchWithLevel(
+            level,
             dictionary,
             dictionary_hash,
             ringbuffer,
@@ -2798,7 +2871,8 @@ fn CreateBackwardReferences<AH: AnyHasher>(
                 sr2.distance = 0usize;
                 sr2.score = kMinScore;
                 max_distance = min(position.wrapping_add(1), max_backward_limit);
-                let is_match_found: bool = hasher.FindLongestMatch(
+                let is_match_found: bool = hasher.FindLongestMatchWithLevel(
+                    level,
                     dictionary,
                     dictionary_hash,
                     ringbuffer,
@@ -2913,11 +2987,13 @@ pub fn BrotliCreateBackwardReferences<
     num_commands: &mut usize,
     num_literals: &mut usize,
 ) {
+    let level = detect_level();
     match (hasher_union) {
         &mut UnionHasher::Uninit => panic!("working with uninitialized hash map"),
         &mut UnionHasher::H10(ref mut hasher) => {
             if params.quality >= 11 {
-                super::backward_references_hq::BrotliCreateHqZopfliBackwardReferences(
+                super::backward_references_hq::BrotliCreateHqZopfliBackwardReferencesAtLevel(
+                    level,
                     alloc,
                     if params.use_dictionary {
                         Some(dictionary)
@@ -2938,7 +3014,8 @@ pub fn BrotliCreateBackwardReferences<
                     num_literals,
                 )
             } else {
-                super::backward_references_hq::BrotliCreateZopfliBackwardReferences(
+                super::backward_references_hq::BrotliCreateZopfliBackwardReferencesAtLevel(
+                    level,
                     alloc,
                     if params.use_dictionary {
                         Some(dictionary)
@@ -2961,6 +3038,7 @@ pub fn BrotliCreateBackwardReferences<
             }
         }
         &mut UnionHasher::H2(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -2981,6 +3059,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H3(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3001,6 +3080,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H4(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3021,6 +3101,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H5(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3041,6 +3122,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H5q7(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3061,6 +3143,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H5q5(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3081,6 +3164,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H6(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3101,6 +3185,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H40(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3121,6 +3206,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H41(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3141,6 +3227,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H42(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3161,9 +3248,10 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H58(ref mut hasher) => {
-            dispatch!(detect_level(), simd => {
+            dispatch!(level, simd => {
                 let mut hasher = TaggedHasherSimd::new(simd, hasher);
                 CreateBackwardReferences(
+                    level,
                     if params.use_dictionary { Some(dictionary) } else { None },
                     &kStaticDictionaryHash[..],
                     num_bytes,
@@ -3182,9 +3270,10 @@ pub fn BrotliCreateBackwardReferences<
             })
         }
         &mut UnionHasher::H68(ref mut hasher) => {
-            dispatch!(detect_level(), simd => {
+            dispatch!(level, simd => {
                 let mut hasher = TaggedHasherSimd::new(simd, hasher);
                 CreateBackwardReferences(
+                    level,
                     if params.use_dictionary { Some(dictionary) } else { None },
                     &kStaticDictionaryHash[..],
                     num_bytes,
@@ -3203,6 +3292,7 @@ pub fn BrotliCreateBackwardReferences<
             })
         }
         &mut UnionHasher::H9(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {
@@ -3223,6 +3313,7 @@ pub fn BrotliCreateBackwardReferences<
             num_literals,
         ),
         &mut UnionHasher::H54(ref mut hasher) => CreateBackwardReferences(
+            level,
             if params.use_dictionary {
                 Some(dictionary)
             } else {

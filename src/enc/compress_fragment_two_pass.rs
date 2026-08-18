@@ -1,5 +1,6 @@
 use core;
 use core::cmp::min;
+use fearless_simd::Level;
 
 use super::super::alloc;
 use super::backward_references::kHashMul32;
@@ -10,9 +11,10 @@ use super::entropy_encode::{
 };
 use super::static_dict::{
     BROTLI_UNALIGNED_LOAD32, BROTLI_UNALIGNED_LOAD64, BROTLI_UNALIGNED_STORE64,
-    FindMatchLengthWithLimit,
+    FindMatchLengthWithLimitAtLevel,
 };
 use super::util::{Log2FloorNonZero, floatX};
+use super::vectorization::detect_level;
 static kCompressFragmentTwoPassBlockSize: usize = (1i32 << 17) as usize;
 
 // returns number of commands inserted
@@ -156,6 +158,7 @@ fn IsMatch(p1: &[u8], p2: &[u8], length: usize) -> bool {
 #[allow(unused_assignments)]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn CreateCommands(
+    level: Level,
     input_index: usize,
     block_size: usize,
     input_size: usize,
@@ -232,7 +235,8 @@ fn CreateCommands(
             }
             {
                 let base: usize = ip_index;
-                let matched: usize = min_match.wrapping_add(FindMatchLengthWithLimit(
+                let matched: usize = min_match.wrapping_add(FindMatchLengthWithLimitAtLevel(
+                    level,
                     &base_ip[(candidate + min_match)..],
                     &base_ip[(ip_index + min_match)..],
                     ip_end.wrapping_sub(ip_index).wrapping_sub(min_match),
@@ -303,7 +307,8 @@ fn CreateCommands(
                 && IsMatch(&base_ip[ip_index..], &base_ip[candidate..], min_match)
             {
                 let base_index: usize = ip_index;
-                let matched: usize = min_match.wrapping_add(FindMatchLengthWithLimit(
+                let matched: usize = min_match.wrapping_add(FindMatchLengthWithLimitAtLevel(
+                    level,
                     &base_ip[(candidate + min_match)..],
                     &base_ip[(ip_index + min_match)..],
                     ip_end.wrapping_sub(ip_index).wrapping_sub(min_match),
@@ -651,6 +656,7 @@ fn compress_fragment_two_pass_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
     storage_ix: &mut usize,
     storage: &mut [u8],
 ) {
+    let level = detect_level();
     let mut input_index: usize = 0usize;
     while input_size > 0usize {
         let block_size: usize = min(input_size, kCompressFragmentTwoPassBlockSize);
@@ -660,6 +666,7 @@ fn compress_fragment_two_pass_impl<AllocHT: alloc::Allocator<HuffmanTree>>(
             let mut literals = &mut literal_buf[..];
             let mut commands = &mut command_buf[..];
             CreateCommands(
+                level,
                 input_index,
                 block_size,
                 input_size,

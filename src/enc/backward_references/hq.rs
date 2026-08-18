@@ -2,7 +2,7 @@ use crate::alloc::{Allocator, SliceWrapper, SliceWrapperMut};
 use core;
 use core::cmp::{max, min};
 
-use fearless_simd::{Simd, SimdBase, SimdMask, u8x32};
+use fearless_simd::{Level, Simd, SimdBase, SimdMask, u8x32};
 
 use super::hash_to_binary_tree::{
     Allocable, BackwardMatch, BackwardMatchMut, H10, H10Params, StoreAndFindMatchesH10Simd, Union1,
@@ -21,7 +21,7 @@ use crate::enc::constants::{kCopyExtra, kInsExtra};
 use crate::enc::encode;
 use crate::enc::literal_cost::BrotliEstimateBitCostsForLiterals;
 use crate::enc::static_dict::{
-    BrotliDictionary, BrotliFindAllStaticDictionaryMatches, FindMatchLengthWithLimitSimd,
+    BrotliDictionary, BrotliFindAllStaticDictionaryMatchesAtLevel, FindMatchLengthWithLimitSimd,
 };
 use crate::enc::util::{FastLog2, FastLog2f64, floatX};
 use crate::enc::vectorization::detect_level;
@@ -343,6 +343,7 @@ fn FindAllMatchesH10<
     Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
     Params: H10Params,
 >(
+    level: Level,
     handle: &mut H10<AllocU32, Buckets, Params>,
     dictionary: Option<&BrotliDictionary>,
     data: &[u8],
@@ -358,8 +359,9 @@ fn FindAllMatchesH10<
 where
     Buckets: PartialEq<Buckets>,
 {
-    dispatch!(detect_level(), simd => FindAllMatchesH10Simd(
+    dispatch!(level, simd => FindAllMatchesH10Simd(
         simd,
+        level,
         handle,
         dictionary,
         data,
@@ -384,6 +386,7 @@ fn FindAllMatchesH10Simd<
     Params: H10Params,
 >(
     simd: S,
+    level: Level,
     handle: &mut H10<AllocU32, Buckets, Params>,
     dictionary: Option<&BrotliDictionary>,
     data: &[u8],
@@ -512,7 +515,8 @@ fn FindAllMatchesH10Simd<
     {
         let minlen = max(4, best_len.wrapping_add(1));
         if dictionary.is_some()
-            && BrotliFindAllStaticDictionaryMatches(
+            && BrotliFindAllStaticDictionaryMatchesAtLevel(
+                level,
                 dictionary.unwrap(),
                 &data[cur_ix_masked..],
                 minlen,
@@ -1018,6 +1022,7 @@ fn ShortestPathPositionsSimd<
     AllocF: Allocator<floatX>,
 >(
     simd: S,
+    level: Level,
     handle: &mut H10<AllocU32, Buckets, Params>,
     dictionary: Option<&BrotliDictionary>,
     num_bytes: usize,
@@ -1044,6 +1049,7 @@ fn ShortestPathPositionsSimd<
             let mut skip: usize;
             let mut num_matches: usize = FindAllMatchesH10Simd(
                 simd,
+                level,
                 handle,
                 dictionary,
                 ringbuffer,
@@ -1140,6 +1146,46 @@ pub fn BrotliZopfliComputeShortestPath<
 where
     Buckets: PartialEq<Buckets>,
 {
+    BrotliZopfliComputeShortestPathAtLevel(
+        detect_level(),
+        m,
+        dictionary,
+        num_bytes,
+        position,
+        ringbuffer,
+        ringbuffer_mask,
+        ringbuffer_break,
+        params,
+        max_backward_limit,
+        dist_cache,
+        handle,
+        nodes,
+    )
+}
+
+fn BrotliZopfliComputeShortestPathAtLevel<
+    AllocU32: Allocator<u32>,
+    Buckets: Allocable<u32, AllocU32> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+    AllocF: Allocator<floatX>,
+>(
+    level: Level,
+    m: &mut AllocF,
+    dictionary: Option<&BrotliDictionary>,
+    num_bytes: usize,
+    position: usize,
+    ringbuffer: &[u8],
+    ringbuffer_mask: usize,
+    ringbuffer_break: Option<core::num::NonZeroUsize>,
+    params: &BrotliEncoderParams,
+    max_backward_limit: usize,
+    dist_cache: &[i32],
+    handle: &mut H10<AllocU32, Buckets, Params>,
+    nodes: &mut [ZopfliNode],
+) -> usize
+where
+    Buckets: PartialEq<Buckets>,
+{
     let max_zopfli_len: usize = MaxZopfliLen(params);
     let mut model: ZopfliCostModel<AllocF>;
     let mut queue: StartPosQueue;
@@ -1162,8 +1208,9 @@ where
     }
     model.set_from_literal_costs(position, ringbuffer, ringbuffer_mask);
     queue = StartPosQueue::default();
-    dispatch!(detect_level(), simd => ShortestPathPositionsSimd(
+    dispatch!(level, simd => ShortestPathPositionsSimd(
         simd,
+        level,
         handle,
         dictionary,
         num_bytes,
@@ -1211,6 +1258,48 @@ pub fn BrotliCreateZopfliBackwardReferences<
 ) where
     Buckets: PartialEq<Buckets>,
 {
+    BrotliCreateZopfliBackwardReferencesAtLevel(
+        detect_level(),
+        alloc,
+        dictionary,
+        num_bytes,
+        position,
+        ringbuffer,
+        ringbuffer_mask,
+        ringbuffer_break,
+        params,
+        hasher,
+        dist_cache,
+        last_insert_len,
+        commands,
+        num_commands,
+        num_literals,
+    )
+}
+
+pub(crate) fn BrotliCreateZopfliBackwardReferencesAtLevel<
+    Alloc: Allocator<u32> + Allocator<floatX> + Allocator<ZopfliNode>,
+    Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+>(
+    level: Level,
+    alloc: &mut Alloc,
+    dictionary: Option<&BrotliDictionary>,
+    num_bytes: usize,
+    position: usize,
+    ringbuffer: &[u8],
+    ringbuffer_mask: usize,
+    ringbuffer_break: Option<core::num::NonZeroUsize>,
+    params: &BrotliEncoderParams,
+    hasher: &mut H10<Alloc, Buckets, Params>,
+    dist_cache: &mut [i32],
+    last_insert_len: &mut usize,
+    commands: &mut [Command],
+    num_commands: &mut usize,
+    num_literals: &mut usize,
+) where
+    Buckets: PartialEq<Buckets>,
+{
     let max_backward_limit: usize = (1usize << params.lgwin).wrapping_sub(16);
     // FIXME: makes little sense to test if N+1 > 0 -- always true unless wrapping. Perhaps use allocate() instead?
     let mut nodes = alloc_or_default::<ZopfliNode, _>(alloc, num_bytes + 1);
@@ -1218,7 +1307,8 @@ pub fn BrotliCreateZopfliBackwardReferences<
         return;
     }
     BrotliInitZopfliNodes(nodes.slice_mut(), num_bytes.wrapping_add(1));
-    *num_commands = num_commands.wrapping_add(BrotliZopfliComputeShortestPath(
+    *num_commands = num_commands.wrapping_add(BrotliZopfliComputeShortestPathAtLevel(
+        level,
         alloc,
         dictionary,
         num_bytes,
@@ -1367,6 +1457,7 @@ impl<AllocF: Allocator<floatX>> ZopfliCostModel<AllocF> {
 /// match lengths tens of times per position.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn ZopfliIterate<AllocF: Allocator<floatX>>(
+    level: Level,
     num_bytes: usize,
     position: usize,
     ringbuffer: &[u8],
@@ -1381,7 +1472,7 @@ fn ZopfliIterate<AllocF: Allocator<floatX>>(
     matches: &[u64],
     nodes: &mut [ZopfliNode],
 ) -> usize {
-    dispatch!(detect_level(), simd => ZopfliIterateSimd(
+    dispatch!(level, simd => ZopfliIterateSimd(
         simd,
         num_bytes,
         position,
@@ -1507,6 +1598,48 @@ pub fn BrotliCreateHqZopfliBackwardReferences<
 ) where
     Buckets: PartialEq<Buckets>,
 {
+    BrotliCreateHqZopfliBackwardReferencesAtLevel(
+        detect_level(),
+        alloc,
+        dictionary,
+        num_bytes,
+        position,
+        ringbuffer,
+        ringbuffer_mask,
+        ringbuffer_break,
+        params,
+        hasher,
+        dist_cache,
+        last_insert_len,
+        commands,
+        num_commands,
+        num_literals,
+    )
+}
+
+pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
+    Alloc: Allocator<u32> + Allocator<u64> + Allocator<floatX> + Allocator<ZopfliNode>,
+    Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
+    Params: H10Params,
+>(
+    level: Level,
+    alloc: &mut Alloc,
+    dictionary: Option<&BrotliDictionary>,
+    num_bytes: usize,
+    position: usize,
+    ringbuffer: &[u8],
+    ringbuffer_mask: usize,
+    ringbuffer_break: Option<core::num::NonZeroUsize>,
+    params: &BrotliEncoderParams,
+    hasher: &mut H10<Alloc, Buckets, Params>,
+    dist_cache: &mut [i32],
+    last_insert_len: &mut usize,
+    commands: &mut [Command],
+    num_commands: &mut usize,
+    num_literals: &mut usize,
+) where
+    Buckets: PartialEq<Buckets>,
+{
     let max_backward_limit: usize = (1usize << params.lgwin).wrapping_sub(16);
     let mut num_matches = alloc_or_default::<u32, _>(alloc, num_bytes);
     let mut matches_size: usize = (4usize).wrapping_mul(num_bytes);
@@ -1568,6 +1701,7 @@ pub fn BrotliCreateHqZopfliBackwardReferences<
                 return;
             }
             let num_found_matches: usize = FindAllMatchesH10(
+                level,
                 hasher,
                 dictionary, //&params.dictionary ,
                 ringbuffer,
@@ -1666,6 +1800,7 @@ pub fn BrotliCreateHqZopfliBackwardReferences<
             *i = *j;
         }
         *num_commands = num_commands.wrapping_add(ZopfliIterate(
+            level,
             num_bytes,
             position,
             ringbuffer,
