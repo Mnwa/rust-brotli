@@ -151,9 +151,16 @@ impl Buckets for Sum<'_> {
     }
     #[inline(always)]
     fn chunk<S: Simd>(&self, simd: S, at: usize) -> u32x16<S> {
-        let (left, _) = self.0[at..].as_chunks::<16>();
-        let (right, _) = self.1[at..].as_chunks::<16>();
-        u32x16::load_array_ref(simd, &left[0]) + u32x16::load_array_ref(simd, &right[0])
+        let left = self.0[at..].first_chunk::<16>();
+        let right = self.1[at..].first_chunk::<16>();
+        match (left, right) {
+            (Some(left), Some(right)) => {
+                u32x16::load_array_ref(simd, left) + u32x16::load_array_ref(simd, right)
+            }
+            (Some(left), None) => u32x16::load_array_ref(simd, left),
+            (None, Some(right)) => u32x16::load_array_ref(simd, right),
+            (None, None) => u32x16::splat(simd, 0),
+        }
     }
 }
 
