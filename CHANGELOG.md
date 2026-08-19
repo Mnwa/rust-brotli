@@ -38,6 +38,21 @@ the MSRV remains 1.89.0.
 - `README.md` now documents allocation-byte and allocation-count profiling separately, including
   `HOTPATH_ALLOC_METRIC=count` and JSON output.
 
+### SIMD minimum reductions
+
+- Block splitting now reduces its eight cost and winner-index lanes with architecture-specific
+  `fearless_simd` kernels. AArch64 uses NEON horizontal minimum instructions; x86 uses AVX2,
+  SSE4.2 or SSE2 reduction trees, with AVX-512 reductions for 64-bit lanes.
+- AVX2 and SSE retain the portable `u64x8` fold because emulating unsigned 64-bit minimum with
+  compare-and-blend sequences was slower than the compiler's scalarized reduction. AVX-512 uses
+  its native unsigned 64-bit minimum instructions.
+- Apple Silicon microbenchmarks reduced `f32x8` minimum time from approximately 0.626 ns to
+  0.566 ns, `u32x8` from 0.340 ns to 0.277 ns, and feature-gated `u64x8` from 0.844 ns to
+  0.592 ns. The `f64x8` result was unchanged within measurement variance.
+- Every lane is covered by direct reduction tests for both the standard and `float64`
+  configurations. The x86 kernels also pass under Rosetta and compile cleanly for the x86-64
+  Linux target; emitted AVX2 and AVX-512 instruction sequences were inspected separately.
+
 ### Performance and verification
 
 On Apple Silicon, an uninstrumented 50-run release benchmark of `testdata/alice29.txt` at q11
