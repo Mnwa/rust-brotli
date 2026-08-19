@@ -88,6 +88,7 @@ pub struct RingBuffer<AllocU8: alloc::Allocator<u8>> {
     pub mask_: u32,
     pub tail_size_: u32,
     pub total_size_: u32,
+    pub compact_size_: u32,
     pub cur_size_: u32,
     pub pos_: u32,
     pub data_mo: AllocU8::AllocatedMemory,
@@ -410,6 +411,7 @@ fn RingBufferInit<AllocU8: alloc::Allocator<u8>>() -> RingBuffer<AllocU8> {
         mask_: 0, // 0xff??
         tail_size_: 0,
         total_size_: 0,
+        compact_size_: 0,
 
         cur_size_: 0,
         pos_: 0,
@@ -603,6 +605,11 @@ fn RingBufferSetup<AllocU8: alloc::Allocator<u8>>(
     rb.mask_ = (1u32 << window_bits).wrapping_sub(1);
     rb.tail_size_ = 1u32 << tail_bits;
     rb.total_size_ = rb.size_.wrapping_add(rb.tail_size_);
+    rb.compact_size_ = if params.size_hint != 0 && params.size_hint < rb.tail_size_ as usize {
+        params.size_hint as u32
+    } else {
+        0
+    };
 }
 
 fn EncodeWindowBits(
@@ -757,8 +764,20 @@ fn RingBufferWrite<AllocU8: alloc::Allocator<u8>>(
 ) {
     if rb.pos_ == 0u32 && (n < rb.tail_size_ as usize) {
         rb.pos_ = n as u32;
-        RingBufferInitBuffer(m, rb.pos_, rb);
+        RingBufferInitBuffer(m, max(rb.pos_, rb.compact_size_), rb);
         rb.data_mo.slice_mut()[rb.buffer_index..(rb.buffer_index + n)].copy_from_slice(&bytes[..n]);
+        rb.data_mo.slice_mut()
+            [rb.buffer_index.wrapping_add(n)..rb.buffer_index.wrapping_add(n + 7)]
+            .fill(0);
+        return;
+    }
+    if rb.cur_size_ < rb.total_size_ && (rb.pos_ as usize).wrapping_add(n) <= rb.cur_size_ as usize
+    {
+        let begin = rb.buffer_index.wrapping_add(rb.pos_ as usize);
+        rb.data_mo.slice_mut()[begin..begin.wrapping_add(n)].copy_from_slice(&bytes[..n]);
+        rb.pos_ = rb.pos_.wrapping_add(n as u32);
+        let slack = rb.buffer_index.wrapping_add(rb.pos_ as usize);
+        rb.data_mo.slice_mut()[slack..slack.wrapping_add(7)].fill(0);
         return;
     }
     if rb.cur_size_ < rb.total_size_ {
@@ -2479,7 +2498,9 @@ impl<Alloc: BrotliAlloc> BrotliEncoderStateStruct<Alloc> {
                 .wrapping_add(bytes.wrapping_div(2) as usize)
                 .wrapping_add(1);
             if newsize > self.cmd_alloc_size_ {
-                newsize = newsize.wrapping_add(bytes.wrapping_div(4).wrapping_add(16) as usize);
+                if !is_last {
+                    newsize = newsize.wrapping_add(bytes.wrapping_div(4).wrapping_add(16) as usize);
+                }
                 self.cmd_alloc_size_ = newsize;
                 let mut new_commands = allocate::<Command, _>(&mut self.m8, newsize);
                 if !self.commands_.slice().is_empty() {
@@ -3194,6 +3215,44 @@ mod test {
             _ => panic!("quality 11 must select H10"),
         }
         hasher.free(&mut alloc);
+    }
+
+    #[test]
+    fn ring_buffer_retains_compact_storage_for_an_accurate_size_hint() {
+        let mut params = super::BrotliEncoderInitParams();
+        params.lgwin = 22;
+        params.lgblock = 18;
+        params.size_hint = 100;
+        let mut ring = super::RingBufferInit::<StandardAlloc>();
+        super::RingBufferSetup(&params, &mut ring);
+
+        let mut alloc = StandardAlloc::default();
+        super::RingBufferWrite(&mut alloc, &[1; 60], 60, &mut ring);
+        super::RingBufferWrite(&mut alloc, &[2; 40], 40, &mut ring);
+
+        assert_eq!(ring.cur_size_, 100);
+        assert_eq!(ring.pos_, 100);
+        assert_eq!(&ring.data_mo.slice()[ring.buffer_index..62], &[1; 60]);
+        assert_eq!(&ring.data_mo.slice()[62..102], &[2; 40]);
+    }
+
+    #[test]
+    fn ring_buffer_expands_when_the_size_hint_is_too_small() {
+        let mut params = super::BrotliEncoderInitParams();
+        params.lgwin = 22;
+        params.lgblock = 18;
+        params.size_hint = 100;
+        let mut ring = super::RingBufferInit::<StandardAlloc>();
+        super::RingBufferSetup(&params, &mut ring);
+
+        let mut alloc = StandardAlloc::default();
+        super::RingBufferWrite(&mut alloc, &[1; 60], 60, &mut ring);
+        super::RingBufferWrite(&mut alloc, &[2; 50], 50, &mut ring);
+
+        assert_eq!(ring.cur_size_, ring.total_size_);
+        assert_eq!(ring.pos_, 110);
+        assert_eq!(&ring.data_mo.slice()[ring.buffer_index..62], &[1; 60]);
+        assert_eq!(&ring.data_mo.slice()[62..112], &[2; 50]);
     }
 
     #[test]

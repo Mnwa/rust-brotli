@@ -869,6 +869,13 @@ fn main() {
                 Err(why) => panic!("couldn't open {:}\n{:}", filenames[0], why),
                 Ok(file) => file,
             };
+            if do_compress
+                && params.size_hint == 0
+                && let Ok(metadata) = input.metadata()
+                && metadata.is_file()
+            {
+                params.size_hint = metadata.len().min(1u64 << 30) as usize;
+            }
             if !filenames[1].is_empty() {
                 let mut output = match File::create(Path::new(&filenames[1])) {
                     Err(why) => panic!(

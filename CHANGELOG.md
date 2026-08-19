@@ -13,9 +13,9 @@ the MSRV remains 1.89.0.
 - Block splitting, histogram clustering and meta-block serialization now coalesce compatible
   temporary arrays into shared backing allocations and reuse scratch storage between command and
   distance passes.
-- On `testdata/alice29.txt` at q11, the user-facing CLI invocation drops from 108 to 84 allocation
-  calls: **22.2% fewer allocations**. Excluding the CLI's 19 calls, encoder allocation count drops
-  from 89 to 65, or **27.0%**.
+- On `testdata/alice29.txt` at q11, the user-facing CLI invocation drops from 108 to 83 allocation
+  calls: **23.1% fewer allocations**. Excluding the CLI's 19 calls, encoder allocation count drops
+  from 89 to 64, or **28.1%**.
 
 ### Allocation volume
 
@@ -26,9 +26,19 @@ the MSRV remains 1.89.0.
   streaming inputs.
 - The q11 Zopfli distance-cost table is allocated for the effective distance alphabet, at most 544
   floats, rather than unnecessarily including one float for every input byte.
+- Regular-file compression supplies the file length as the existing encoder size hint. When the
+  complete input is smaller than the ring-buffer tail, the ring buffer can consequently remain in
+  its compact linear representation across multiple input-buffer reads instead of immediately
+  expanding to the full window. An underestimated hint still falls back to the full ring.
+- The q11 match count cannot exceed 128, so it is stored as one byte per input position instead of
+  four. The initial match array now reserves three entries per input byte rather than four and
+  retains its existing geometric growth fallback for match-heavy inputs.
+- A final one-shot block allocates only the proven command upper bound; the extra growth allowance
+  remains in place for non-final streaming blocks that can reuse the capacity.
 - On `testdata/alice29.txt` at q11, cumulative allocated storage reported by `hotpath-alloc` drops
-  from 52.9 MB to 21.4 MB: **31.5 MB, or 59.5%, less allocation traffic**. The encoder setup portion
-  falls from 34.5 MB to 3.7 MB.
+  from 52.9 MB to 11.1 MB: **41.8 MB, or 79.0%, less allocation traffic**. Relative to the preceding
+  21.4 MB implementation, this round removes another **10.3 MB, or 48.1%**. The encoder setup
+  portion falls from 34.5 MB to 3.1 MB, and the ring-buffer allocation falls from 8.3 MB to 148.5 KB.
 
 ### Entropy-cost profiling
 
@@ -55,9 +65,12 @@ the MSRV remains 1.89.0.
 
 ### Performance and verification
 
-On Apple Silicon, an uninstrumented 50-run release benchmark of `testdata/alice29.txt` at q11
-improved from 85.1 ms to 84.3 ms, approximately **0.9% less wall time**. The resulting stream is
-byte-identical to 10.0.0; `testdata/random_then_unicode` is also byte-identical.
+On Apple Silicon, the earlier uninstrumented 50-run release benchmark of `testdata/alice29.txt` at
+q11 improved from 85.1 ms to 84.3 ms, approximately **0.9% less wall time**. An order-balanced
+batched comparison for the additional allocation-volume changes measured 82.7 ms for the previous
+implementation and 83.2 ms for this implementation per compression: approximately **0.6% slower,
+within run-to-run noise**. The resulting stream is byte-identical to 10.0.0;
+`testdata/random_then_unicode` is also byte-identical.
 
 The complete library, binary, example and integration-test suite passes, as do formatting, strict
 Clippy, `no-default-features`, `hotpath-alloc` and `vector_scratch_space` configurations.
