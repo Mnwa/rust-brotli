@@ -37,7 +37,7 @@ use super::metablock::{
     BrotliOptimizeHistograms,
 };
 pub use super::parameters::BrotliEncoderParameter;
-use super::static_dict::{BrotliGetDictionary, kNumDistanceCacheEntries};
+use super::static_dict::{BROTLI_UNALIGNED_LOAD32, BrotliGetDictionary, kNumDistanceCacheEntries};
 use super::util::{Log2FloorNonZero, floatX};
 use crate::enc::combined_alloc::{alloc_default, allocate};
 use crate::enc::input_pair::InputReferenceMut;
@@ -989,7 +989,40 @@ fn InitializeH54<AllocU32: alloc::Allocator<u32>>(
 fn InitializeH9<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>>(
     m16: &mut Alloc,
     params: &BrotliEncoderParams,
+    one_shot: bool,
+    input_size: usize,
+    data: &[u8],
 ) -> H9<Alloc> {
+    let bucket_size = 1usize << H9_BUCKET_BITS;
+    let full_bucket_len = H9_BLOCK_SIZE << H9_BUCKET_BITS;
+    let mut num = allocate::<u16, _>(m16, bucket_size);
+    let use_compact = one_shot
+        && input_size.saturating_add(bucket_size + 1) < full_bucket_len
+        && data.len() >= input_size.saturating_add(3);
+    let buckets = if use_compact {
+        for i in 0..input_size {
+            let h = BROTLI_UNALIGNED_LOAD32(&data[i..])
+                .wrapping_mul(super::backward_references::kHashMul32);
+            let key = (h >> (32 - H9_BUCKET_BITS)) as usize;
+            let count = &mut num.slice_mut()[key];
+            if usize::from(*count) < H9_BLOCK_SIZE {
+                *count += 1;
+            }
+        }
+        let compact_len = num.slice().iter().map(|&count| usize::from(count)).sum();
+        let mut buckets = allocate::<u32, _>(m16, compact_len + bucket_size + 1);
+        let offsets = buckets.slice_mut().split_at_mut(compact_len).1;
+        let mut offset = 0u32;
+        for (key, &count) in num.slice().iter().enumerate() {
+            offsets[key] = offset;
+            offset = offset.wrapping_add(u32::from(count));
+        }
+        offsets[bucket_size] = offset;
+        num.slice_mut().fill(0);
+        buckets
+    } else {
+        allocate::<u32, _>(m16, full_bucket_len)
+    };
     H9 {
         dict_search_stats_: Struct1 {
             params: params.hasher,
@@ -997,56 +1030,54 @@ fn InitializeH9<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>>(
             dict_num_lookups: 0,
             dict_num_matches: 0,
         },
-        num_: allocate::<u16, _>(m16, 1 << H9_BUCKET_BITS),
-        buckets_: allocate::<u32, _>(m16, H9_BLOCK_SIZE << H9_BUCKET_BITS),
+        num_: num,
+        buckets_: buckets,
         h9_opts: super::backward_references::H9Opts::new(&params.hasher),
     }
 }
 
-fn InitializeH5<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
+fn InitializeH5Specialized<
+    Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
+    Specialization: AdvHashSpecialization + Clone,
+>(
     m16: &mut Alloc,
     params: &BrotliEncoderParams,
-) -> UnionHasher<Alloc> {
-    let block_size = 1u64 << params.hasher.block_bits;
-    let bucket_size = 1u64 << params.hasher.bucket_bits;
-    let buckets: <Alloc as Allocator<u32>>::AllocatedMemory =
-        allocate::<u32, _>(m16, (bucket_size * block_size) as usize);
-    let num: <Alloc as Allocator<u16>>::AllocatedMemory =
-        allocate::<u16, _>(m16, bucket_size as usize);
-
-    if params.hasher.block_bits == (HQ5Sub {}).block_bits()
-        && (1 << params.hasher.bucket_bits) == (HQ5Sub {}).bucket_size()
-    {
-        return UnionHasher::H5q5(AdvHasher {
-            buckets,
-            h9_opts: super::backward_references::H9Opts::new(&params.hasher),
-            num,
-            GetHasherCommon: Struct1 {
-                params: params.hasher,
-                is_prepared_: 1,
-                dict_num_lookups: 0,
-                dict_num_matches: 0,
-            },
-            specialization: HQ5Sub {},
-        });
-    }
-    if params.hasher.block_bits == (HQ7Sub {}).block_bits()
-        && (1 << params.hasher.bucket_bits) == (HQ7Sub {}).bucket_size()
-    {
-        return UnionHasher::H5q7(AdvHasher {
-            buckets,
-            h9_opts: super::backward_references::H9Opts::new(&params.hasher),
-            num,
-            GetHasherCommon: Struct1 {
-                params: params.hasher,
-                is_prepared_: 1,
-                dict_num_lookups: 0,
-                dict_num_matches: 0,
-            },
-            specialization: HQ7Sub {},
-        });
-    }
-    UnionHasher::H5(AdvHasher {
+    specialization: Specialization,
+    one_shot: bool,
+    input_size: usize,
+    data: &[u8],
+) -> AdvHasher<Specialization, Alloc> {
+    let bucket_size = specialization.bucket_size() as usize;
+    let block_size = specialization.block_size() as usize;
+    let full_bucket_len = bucket_size * block_size;
+    let mut num = allocate::<u16, _>(m16, bucket_size);
+    let use_compact = one_shot
+        && input_size.saturating_add(bucket_size + 1) < full_bucket_len
+        && data.len() >= input_size.saturating_add(specialization.StoreLookahead().wrapping_sub(1));
+    let buckets = if use_compact {
+        for i in 0..input_size {
+            let h = specialization.load_and_mix_word(&data[i..]);
+            let key = (h >> specialization.hash_shift()) as u32 as usize;
+            let count = &mut num.slice_mut()[key];
+            if usize::from(*count) < block_size {
+                *count += 1;
+            }
+        }
+        let compact_len = num.slice().iter().map(|&count| usize::from(count)).sum();
+        let mut buckets = allocate::<u32, _>(m16, compact_len + bucket_size + 1);
+        let offsets = buckets.slice_mut().split_at_mut(compact_len).1;
+        let mut offset = 0u32;
+        for (key, &count) in num.slice().iter().enumerate() {
+            offsets[key] = offset;
+            offset = offset.wrapping_add(u32::from(count));
+        }
+        offsets[bucket_size] = offset;
+        num.slice_mut().fill(0);
+        buckets
+    } else {
+        allocate::<u32, _>(m16, full_bucket_len)
+    };
+    AdvHasher {
         buckets,
         h9_opts: super::backward_references::H9Opts::new(&params.hasher),
         num,
@@ -1056,13 +1087,54 @@ fn InitializeH5<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::All
             dict_num_lookups: 0,
             dict_num_matches: 0,
         },
-        specialization: H5Sub {
+        specialization,
+    }
+}
+
+fn InitializeH5<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
+    m16: &mut Alloc,
+    params: &BrotliEncoderParams,
+    one_shot: bool,
+    input_size: usize,
+    data: &[u8],
+) -> UnionHasher<Alloc> {
+    if params.hasher.block_bits == (HQ5Sub {}).block_bits()
+        && (1 << params.hasher.bucket_bits) == (HQ5Sub {}).bucket_size()
+    {
+        return UnionHasher::H5q5(InitializeH5Specialized(
+            m16,
+            params,
+            HQ5Sub {},
+            one_shot,
+            input_size,
+            data,
+        ));
+    }
+    if params.hasher.block_bits == (HQ7Sub {}).block_bits()
+        && (1 << params.hasher.bucket_bits) == (HQ7Sub {}).bucket_size()
+    {
+        return UnionHasher::H5q7(InitializeH5Specialized(
+            m16,
+            params,
+            HQ7Sub {},
+            one_shot,
+            input_size,
+            data,
+        ));
+    }
+    UnionHasher::H5(InitializeH5Specialized(
+        m16,
+        params,
+        H5Sub {
             hash_shift_: 32i32 - params.hasher.bucket_bits,
-            bucket_size_: bucket_size as u32,
+            bucket_size_: 1u32 << params.hasher.bucket_bits,
             block_bits_: params.hasher.block_bits,
-            block_mask_: block_size.wrapping_sub(1) as u32,
+            block_mask_: (1u32 << params.hasher.block_bits).wrapping_sub(1),
         },
-    })
+        one_shot,
+        input_size,
+        data,
+    ))
 }
 fn InitializeH6<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc::Allocator<u32>>(
     m16: &mut Alloc,
@@ -1148,6 +1220,7 @@ fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc:
     ringbuffer_break: Option<core::num::NonZeroUsize>,
     one_shot: bool,
     input_size: usize,
+    data: &[u8],
 ) -> UnionHasher<Alloc> {
     let hasher_type: i32 = params.hasher.type_;
     if hasher_type == 2i32 {
@@ -1160,7 +1233,7 @@ fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc:
         return UnionHasher::H4(InitializeH4(m, params));
     }
     if hasher_type == 5i32 {
-        return InitializeH5(m, params);
+        return InitializeH5(m, params, one_shot, input_size, data);
     }
     if hasher_type == 6i32 {
         return InitializeH6(m, params);
@@ -1172,7 +1245,7 @@ fn BrotliMakeHasher<Alloc: alloc::Allocator<u8> + alloc::Allocator<u16> + alloc:
         return InitializeH68(m, params);
     }
     if hasher_type == 9i32 {
-        return UnionHasher::H9(InitializeH9(m, params));
+        return UnionHasher::H9(InitializeH9(m, params, one_shot, input_size, data));
     }
     if hasher_type == 40i32 {
         return UnionHasher::H40(InitializeH40(m, params));
@@ -1226,7 +1299,7 @@ pub(crate) fn hasher_setup<Alloc: Allocator<u8> + Allocator<u16> + Allocator<u32
         ChooseHasher(&mut (*params));
         //alloc_size = HasherSize(params, one_shot, input_size);
         //xself = BrotliAllocate(m, alloc_size.wrapping_mul(::core::mem::size_of::<u8>()))
-        *handle = BrotliMakeHasher(m16, params, ringbuffer_break, one_shot, input_size);
+        *handle = BrotliMakeHasher(m16, params, ringbuffer_break, one_shot, input_size, data);
         handle.GetHasherCommon().params = params.hasher;
         HasherReset(handle); // this sets everything to zero, unlike in C
         handle.GetHasherCommon().is_prepared_ = 1;
@@ -1571,8 +1644,12 @@ pub(crate) fn encoder_compress<
             };
             ChooseHasher(&mut params);
             s_orig.hasher_ = BrotliMakeHasher(
-                m8, &params, None, /* no custom dict */
-                true, input_size,
+                m8,
+                &params,
+                None, /* no custom dict */
+                true,
+                input_size,
+                input_buffer,
             );
         }
         let mut result: bool;
@@ -3209,10 +3286,60 @@ mod test {
         super::ChooseHasher(&mut params);
 
         let mut alloc = StandardAlloc::default();
-        let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, true, INPUT_SIZE);
+        let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, true, INPUT_SIZE, &[]);
         match &hasher {
             UnionHasher::H10(h10) => assert_eq!(h10.forest.slice().len(), 2 * INPUT_SIZE),
             _ => panic!("quality 11 must select H10"),
+        }
+        hasher.free(&mut alloc);
+    }
+
+    #[test]
+    fn quality_seven_through_nine_one_shot_hashers_use_compact_buckets() {
+        const INPUT_SIZE: usize = 10_000;
+        let data = vec![b'x'; INPUT_SIZE + 7];
+        for (quality, expected_bucket_entries) in [(7, 64), (8, 128), (9, 256)] {
+            let mut params = super::BrotliEncoderInitParams();
+            params.quality = quality;
+            params.size_hint = INPUT_SIZE;
+            super::ChooseHasher(&mut params);
+
+            let mut alloc = StandardAlloc::default();
+            let mut hasher =
+                super::BrotliMakeHasher(&mut alloc, &params, None, true, INPUT_SIZE, &data);
+            let (bucket_entries, allocation_len) = match &hasher {
+                UnionHasher::H5q7(h) => (
+                    h.buckets.slice().len() - (1 << 15) - 1,
+                    h.buckets.slice().len(),
+                ),
+                UnionHasher::H5(h) => (
+                    h.buckets.slice().len() - (1 << 15) - 1,
+                    h.buckets.slice().len(),
+                ),
+                UnionHasher::H9(h) => (
+                    h.buckets_.slice().len() - (1 << 15) - 1,
+                    h.buckets_.slice().len(),
+                ),
+                _ => panic!("quality {quality} selected an unexpected hasher"),
+            };
+            assert_eq!(bucket_entries, expected_bucket_entries);
+            assert!(bucket_entries < allocation_len);
+            hasher.free(&mut alloc);
+        }
+    }
+
+    #[test]
+    fn non_one_shot_hasher_retains_full_bucket_table() {
+        let mut params = super::BrotliEncoderInitParams();
+        params.quality = 9;
+        super::ChooseHasher(&mut params);
+        let data = [0u8; 7];
+
+        let mut alloc = StandardAlloc::default();
+        let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, false, 0, &data);
+        match &hasher {
+            UnionHasher::H9(h) => assert_eq!(h.buckets_.slice().len(), 256 << 15),
+            _ => panic!("quality 9 must select H9"),
         }
         hasher.free(&mut alloc);
     }
@@ -3288,7 +3415,7 @@ mod test {
             params.quality = quality;
             params.hasher.type_ = hasher_type;
             let mut alloc = StandardAlloc::default();
-            let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, false, 0);
+            let mut hasher = super::BrotliMakeHasher(&mut alloc, &params, None, false, 0, data);
             assert!(matches!(
                 (&hasher, hasher_type),
                 (UnionHasher::H40(_), 40) | (UnionHasher::H41(_), 41) | (UnionHasher::H42(_), 42)

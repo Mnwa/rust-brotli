@@ -855,15 +855,15 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
         }
         if max_length >= 4 && cur_ix_masked.wrapping_add(best_len) <= ring_buffer_mask {
             let key = self.HashBytes(data.split_at(cur_ix_masked).1);
-            let bucket = &mut self
-                .buckets_
-                .slice_mut()
-                .split_at_mut(key << H9_BLOCK_BITS)
-                .1
-                .split_at_mut(H9_BLOCK_SIZE)
-                .0;
-            assert!(bucket.len() > H9_BLOCK_MASK);
-            assert_eq!(bucket.len(), H9_BLOCK_MASK + 1);
+            let offsets_start = compact_bucket_offsets_start(
+                self.buckets_.slice().len(),
+                1 << H9_BUCKET_BITS,
+                H9_BLOCK_SIZE,
+            );
+            let (buckets, offsets) = self.buckets_.slice_mut().split_at_mut(offsets_start);
+            let bucket_offset = compact_bucket_offset(offsets, key, H9_BLOCK_BITS as i32);
+            let bucket_len = compact_bucket_len(offsets, key, H9_BLOCK_SIZE);
+            let bucket = &mut buckets[bucket_offset..bucket_offset + bucket_len];
             let self_num_key = &mut self.num_.slice_mut()[key];
             let down = if *self_num_key > H9_BLOCK_SIZE as u16 {
                 (*self_num_key as usize) - H9_BLOCK_SIZE
@@ -918,7 +918,9 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
                     }
                 }
             }
-            bucket[*self_num_key as usize & H9_BLOCK_MASK] = cur_ix as u32;
+            let minor_ix = *self_num_key as usize & H9_BLOCK_MASK;
+            debug_assert!(minor_ix < bucket.len());
+            bucket[minor_ix] = cur_ix as u32;
             *self_num_key = self_num_key.wrapping_add(1);
         }
         if !is_match_found && let Some(dictionary) = dictionary {
@@ -944,8 +946,15 @@ impl<Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>> AnyHasher for H9<Allo
         let key: u32 = self.HashBytes(data_window) as u32;
         let self_num_key = &mut self.num_.slice_mut()[key as usize];
         let minor_ix: usize = (*self_num_key as usize & H9_BLOCK_MASK);
-        self.buckets_.slice_mut()[minor_ix.wrapping_add((key as usize) << H9_BLOCK_BITS)] =
-            ix as u32;
+        let offsets_start = compact_bucket_offsets_start(
+            self.buckets_.slice().len(),
+            1 << H9_BUCKET_BITS,
+            H9_BLOCK_SIZE,
+        );
+        let (buckets, offsets) = self.buckets_.slice_mut().split_at_mut(offsets_start);
+        let bucket_offset = compact_bucket_offset(offsets, key as usize, H9_BLOCK_BITS as i32);
+        debug_assert!(minor_ix < compact_bucket_len(offsets, key as usize, H9_BLOCK_SIZE));
+        buckets[bucket_offset + minor_ix] = ix as u32;
         *self_num_key = self_num_key.wrapping_add(1);
     }
     fn StoreRange(&mut self, data: &[u8], mask: usize, ix_start: usize, ix_end: usize) {
@@ -990,6 +999,38 @@ pub trait AdvHashSpecialization: PartialEq<Self> {
     fn block_size(&self) -> u32;
     fn block_bits(&self) -> i32;
 }
+
+#[inline(always)]
+fn compact_bucket_offset(offsets: &[u32], key: usize, block_bits: i32) -> usize {
+    if offsets.is_empty() {
+        key << block_bits
+    } else {
+        offsets[key] as usize
+    }
+}
+
+#[inline(always)]
+fn compact_bucket_len(offsets: &[u32], key: usize, block_size: usize) -> usize {
+    if offsets.is_empty() {
+        block_size
+    } else {
+        offsets[key + 1].wrapping_sub(offsets[key]) as usize
+    }
+}
+
+#[inline(always)]
+fn compact_bucket_offsets_start(
+    allocation_len: usize,
+    bucket_size: usize,
+    block_size: usize,
+) -> usize {
+    if allocation_len == bucket_size * block_size {
+        allocation_len
+    } else {
+        allocation_len - bucket_size - 1
+    }
+}
+
 pub struct AdvHasher<
     Specialization: AdvHashSpecialization + Sized + Clone,
     Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
@@ -1219,6 +1260,15 @@ impl<
     Alloc: alloc::Allocator<u16> + alloc::Allocator<u32>,
 > AdvHasher<Specialization, Alloc>
 {
+    #[inline(always)]
+    fn bucket_offsets_start(&self) -> usize {
+        compact_bucket_offsets_start(
+            self.buckets.slice().len(),
+            self.specialization.bucket_size() as usize,
+            self.specialization.block_size() as usize,
+        )
+    }
+
     // 7 opt
     // returns a new ix_start
     fn StoreRangeOptBatch(
@@ -1230,15 +1280,12 @@ impl<
     ) -> usize {
         let lookahead = self.specialization.StoreLookahead();
         if ix_end >= ix_start + lookahead * 2 && lookahead == 4 {
+            let offsets_start = self.bucket_offsets_start();
             let num = self.num.slice_mut();
-            let buckets = self.buckets.slice_mut();
+            let (buckets, offsets) = self.buckets.slice_mut().split_at_mut(offsets_start);
             assert_eq!(num.len(), self.specialization.bucket_size() as usize);
-            assert_eq!(
-                buckets.len(),
-                self.specialization.bucket_size() as usize
-                    * self.specialization.block_size() as usize
-            );
             let shift = self.specialization.hash_shift();
+            let block_bits = self.specialization.block_bits();
             let chunk_count = (ix_end - ix_start) / 4;
             for chunk_id in 0..chunk_count {
                 let i = (ix_start + chunk_id * 4) & mask;
@@ -1274,14 +1321,14 @@ impl<
                 let mut num_ref3 = u32::from(num[mixed3]);
                 num[mixed3] = num_ref3.wrapping_add(1) as u16;
                 num_ref3 &= self.specialization.block_mask();
-                let offset0: usize =
-                    (mixed0 << self.specialization.block_bits()) + num_ref0 as usize;
-                let offset1: usize =
-                    (mixed1 << self.specialization.block_bits()) + num_ref1 as usize;
-                let offset2: usize =
-                    (mixed2 << self.specialization.block_bits()) + num_ref2 as usize;
-                let offset3: usize =
-                    (mixed3 << self.specialization.block_bits()) + num_ref3 as usize;
+                let offset0 =
+                    compact_bucket_offset(offsets, mixed0, block_bits) + num_ref0 as usize;
+                let offset1 =
+                    compact_bucket_offset(offsets, mixed1, block_bits) + num_ref1 as usize;
+                let offset2 =
+                    compact_bucket_offset(offsets, mixed2, block_bits) + num_ref2 as usize;
+                let offset3 =
+                    compact_bucket_offset(offsets, mixed3, block_bits) + num_ref3 as usize;
                 buckets[offset0] = (i) as u32;
                 buckets[offset1] = (i + 1) as u32;
                 buckets[offset2] = (i + 2) as u32;
@@ -1306,15 +1353,12 @@ impl<
             assert_eq!(lookahead4, lookahead);
             let mut data64 = [0u8; REG_SIZE + lookahead4 - 1];
             let del = (ix_end - ix_start) / REG_SIZE;
+            let offsets_start = self.bucket_offsets_start();
             let num = self.num.slice_mut();
-            let buckets = self.buckets.slice_mut();
+            let (buckets, offsets) = self.buckets.slice_mut().split_at_mut(offsets_start);
             assert_eq!(num.len(), self.specialization.bucket_size() as usize);
-            assert_eq!(
-                buckets.len(),
-                self.specialization.bucket_size() as usize
-                    * self.specialization.block_size() as usize
-            );
             let shift = self.specialization.hash_shift();
+            let block_bits = self.specialization.block_bits();
             for chunk_id in 0..del {
                 let ix_offset = ix_start + chunk_id * REG_SIZE;
                 data64[..REG_SIZE + lookahead4 - 1].copy_from_slice(
@@ -1360,14 +1404,14 @@ impl<
                     let mut num_ref3 = u32::from(num[mixed3]);
                     num[mixed3] = num_ref3.wrapping_add(1) as u16;
                     num_ref3 &= self.specialization.block_mask();
-                    let offset0: usize =
-                        (mixed0 << self.specialization.block_bits()) + num_ref0 as usize;
-                    let offset1: usize =
-                        (mixed1 << self.specialization.block_bits()) + num_ref1 as usize;
-                    let offset2: usize =
-                        (mixed2 << self.specialization.block_bits()) + num_ref2 as usize;
-                    let offset3: usize =
-                        (mixed3 << self.specialization.block_bits()) + num_ref3 as usize;
+                    let offset0 =
+                        compact_bucket_offset(offsets, mixed0, block_bits) + num_ref0 as usize;
+                    let offset1 =
+                        compact_bucket_offset(offsets, mixed1, block_bits) + num_ref1 as usize;
+                    let offset2 =
+                        compact_bucket_offset(offsets, mixed2, block_bits) + num_ref2 as usize;
+                    let offset3 =
+                        compact_bucket_offset(offsets, mixed3, block_bits) + num_ref3 as usize;
                     buckets[offset0] = (ix_offset + i) as u32;
                     buckets[offset1] = (ix_offset + i + 1) as u32;
                     buckets[offset2] = (ix_offset + i + 2) as u32;
@@ -1388,6 +1432,9 @@ impl<
         ix_end: usize,
     ) -> usize {
         const REG_SIZE: usize = 32usize;
+        if self.bucket_offsets_start() != self.buckets.slice().len() {
+            return ix_start;
+        }
         let lookahead = self.specialization.StoreLookahead();
         if mask == usize::MAX && ix_end > ix_start + REG_SIZE && lookahead == 4 {
             const lookahead4: usize = 4;
@@ -1472,6 +1519,9 @@ impl<
         ix_end: usize,
     ) -> usize {
         const REG_SIZE: usize = 32usize;
+        if self.bucket_offsets_start() != self.buckets.slice().len() {
+            return ix_start;
+        }
         let lookahead = self.specialization.StoreLookahead();
         if mask == usize::MAX && ix_end > ix_start + REG_SIZE && lookahead == 4 {
             const lookahead4: usize = 4;
@@ -1588,8 +1638,10 @@ impl<
             return;
         }
         let shift = self.specialization.hash_shift();
+        let block_bits = self.specialization.block_bits();
+        let offsets_start = self.bucket_offsets_start();
         let num = self.num.slice_mut();
-        let buckets = self.buckets.slice_mut();
+        let (buckets, offsets) = self.buckets.slice_mut().split_at_mut(offsets_start);
         let li = ix & mask;
         let lword = u64::from(data[li])
             | (u64::from(data[li + 1]) << 8)
@@ -1626,10 +1678,10 @@ impl<
         let mut num_ref3 = u32::from(num[mixed3]);
         num[mixed3] = num_ref3.wrapping_add(1) as u16;
         num_ref3 &= self.specialization.block_mask();
-        let offset0: usize = (mixed0 << self.specialization.block_bits()) + num_ref0 as usize;
-        let offset1: usize = (mixed1 << self.specialization.block_bits()) + num_ref1 as usize;
-        let offset2: usize = (mixed2 << self.specialization.block_bits()) + num_ref2 as usize;
-        let offset3: usize = (mixed3 << self.specialization.block_bits()) + num_ref3 as usize;
+        let offset0 = compact_bucket_offset(offsets, mixed0, block_bits) + num_ref0 as usize;
+        let offset1 = compact_bucket_offset(offsets, mixed1, block_bits) + num_ref1 as usize;
+        let offset2 = compact_bucket_offset(offsets, mixed2, block_bits) + num_ref2 as usize;
+        let offset3 = compact_bucket_offset(offsets, mixed3, block_bits) + num_ref3 as usize;
         buckets[offset0] = ix as u32;
         buckets[offset1] = (ix + 2) as u32;
         buckets[offset2] = (ix + 4) as u32;
@@ -1643,8 +1695,10 @@ impl<
             return;
         }
         let shift = self.specialization.hash_shift();
+        let block_bits = self.specialization.block_bits();
+        let offsets_start = self.bucket_offsets_start();
         let num = self.num.slice_mut();
-        let buckets = self.buckets.slice_mut();
+        let (buckets, offsets) = self.buckets.slice_mut().split_at_mut(offsets_start);
         let li = ix & mask;
         let llword = u32::from(data[li])
             | (u32::from(data[li + 1]) << 8)
@@ -1689,10 +1743,10 @@ impl<
         let mut num_ref3 = u32::from(num[mixed3]);
         num[mixed3] = num_ref3.wrapping_add(1) as u16;
         num_ref3 &= self.specialization.block_mask();
-        let offset0: usize = (mixed0 << self.specialization.block_bits()) + num_ref0 as usize;
-        let offset1: usize = (mixed1 << self.specialization.block_bits()) + num_ref1 as usize;
-        let offset2: usize = (mixed2 << self.specialization.block_bits()) + num_ref2 as usize;
-        let offset3: usize = (mixed3 << self.specialization.block_bits()) + num_ref3 as usize;
+        let offset0 = compact_bucket_offset(offsets, mixed0, block_bits) + num_ref0 as usize;
+        let offset1 = compact_bucket_offset(offsets, mixed1, block_bits) + num_ref1 as usize;
+        let offset2 = compact_bucket_offset(offsets, mixed2, block_bits) + num_ref2 as usize;
+        let offset3 = compact_bucket_offset(offsets, mixed3, block_bits) + num_ref3 as usize;
         buckets[offset0] = ix as u32;
         buckets[offset1] = (ix + 4) as u32;
         buckets[offset2] = (ix + 8) as u32;
@@ -1703,9 +1757,13 @@ impl<
         let key: u32 = self.HashBytes(data_window) as u32;
         let minor_ix: usize =
             (self.num.slice()[(key as usize)] as u32 & self.specialization.block_mask()) as usize;
-        let offset: usize =
-            minor_ix.wrapping_add((key << self.specialization.block_bits()) as usize);
-        self.buckets.slice_mut()[offset] = ix as u32;
+        let block_bits = self.specialization.block_bits();
+        let block_size = self.specialization.block_size() as usize;
+        let offsets_start = self.bucket_offsets_start();
+        let (buckets, offsets) = self.buckets.slice_mut().split_at_mut(offsets_start);
+        debug_assert!(minor_ix < compact_bucket_len(offsets, key as usize, block_size));
+        let offset = compact_bucket_offset(offsets, key as usize, block_bits) + minor_ix;
+        buckets[offset] = ix as u32;
         {
             let _lhs = &mut self.num.slice_mut()[(key as usize)];
             *_lhs = (*_lhs as i32 + 1) as u16;
@@ -1805,16 +1863,14 @@ impl<
 
         let key: u32 = self.HashBytes(cur_data) as u32;
         let common_block_bits = self.specialization.block_bits();
+        let block_size = self.specialization.block_size() as usize;
+        let offsets_start = self.bucket_offsets_start();
         let num_ref_mut = &mut self.num.slice_mut()[key as usize];
         let num_copy = *num_ref_mut;
-        let bucket: &mut [u32] = self
-            .buckets
-            .slice_mut()
-            .split_at_mut((key << common_block_bits) as usize)
-            .1
-            .split_at_mut(self.specialization.block_size() as usize)
-            .0;
-        assert!(bucket.len() > self.specialization.block_mask() as usize);
+        let (buckets, offsets) = self.buckets.slice_mut().split_at_mut(offsets_start);
+        let bucket_offset = compact_bucket_offset(offsets, key as usize, common_block_bits);
+        let bucket_len = compact_bucket_len(offsets, key as usize, block_size);
+        let bucket = &mut buckets[bucket_offset..bucket_offset + bucket_len];
         if num_copy != 0 {
             let down: usize = max(
                 i32::from(num_copy) - self.specialization.block_size() as i32,
@@ -1855,7 +1911,9 @@ impl<
                 }
             }
         }
-        bucket[(num_copy as u32 & self.specialization.block_mask()) as usize] = cur_ix as u32;
+        let minor_ix = (num_copy as u32 & self.specialization.block_mask()) as usize;
+        debug_assert!(minor_ix < bucket.len());
+        bucket[minor_ix] = cur_ix as u32;
         *num_ref_mut = num_ref_mut.wrapping_add(1);
 
         if !is_match_found && let Some(dictionary) = dictionary {

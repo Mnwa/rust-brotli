@@ -35,6 +35,13 @@ the MSRV remains 1.89.0.
   retains its existing geometric growth fallback for match-heavy inputs.
 - A final one-shot block allocates only the proven command upper bound; the extra growth allowance
   remains in place for non-final streaming blocks that can reuse the capacity.
+- The q7 through q9 one-shot match finders pre-count the hashes that can occur in the input and
+  allocate only the reachable portion of each bucket's candidate ring. Prefix offsets share the
+  existing bucket allocation, so this does not add an allocation or require a specialized
+  allocator. Multi-block and streaming inputs retain the original fixed-table representation.
+- At q9, `testdata/alice29.txt` allocation traffic falls from 33.9 MB to 2.6 MB: **31.3 MB, or
+  92.3%, less**. For the 10 KB `testdata/random_org_10k.bin` one-shot case, q7, q8 and q9 fall from
+  8.3 MB, 16.3 MB and 32.3 MB respectively to 506.8 KB, with allocation counts unchanged.
 - On `testdata/alice29.txt` at q11, cumulative allocated storage reported by `hotpath-alloc` drops
   from 52.9 MB to 11.1 MB: **41.8 MB, or 79.0%, less allocation traffic**. Relative to the preceding
   21.4 MB implementation, this round removes another **10.3 MB, or 48.1%**. The encoder setup
@@ -71,6 +78,12 @@ batched comparison for the additional allocation-volume changes measured 82.7 ms
 implementation and 83.2 ms for this implementation per compression: approximately **0.6% slower,
 within run-to-run noise**. The resulting stream is byte-identical to 10.0.0;
 `testdata/random_then_unicode` is also byte-identical.
+
+The compact q7 through q9 hash tables also reduce zero-initialization and cache traffic. On the
+10 KB random input, 15 batches of 100 release-mode compressions improved throughput by **1.24x at
+q7, 1.59x at q8 and 2.23x at q9**. Alice q9 performance was statistically unchanged across
+order-balanced runs (within roughly 2%); Alice q7 and q8 span multiple metablocks and therefore use
+the unchanged streaming table.
 
 The complete library, binary, example and integration-test suite passes, as do formatting, strict
 Clippy, `no-default-features`, `hotpath-alloc` and `vector_scratch_space` configurations.
