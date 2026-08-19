@@ -135,8 +135,11 @@ impl Buckets for Own<'_> {
     }
     #[inline(always)]
     fn chunk<S: Simd>(&self, simd: S, at: usize) -> u32x16<S> {
-        let (chunks, _) = self.0[at..].as_chunks::<16>();
-        u32x16::load_array_ref(simd, &chunks[0])
+        let chunk = self.0[at..].first_chunk::<16>();
+        match chunk {
+            Some(c) => u32x16::load_array_ref(simd, c),
+            None => u32x16::splat(simd, 0),
+        }
     }
 }
 
