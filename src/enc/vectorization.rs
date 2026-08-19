@@ -20,8 +20,10 @@ use core::arch::x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
 use fearless_simd::aarch64::Neon;
+#[cfg(all(any(target_arch = "x86", target_arch = "x86_64"), feature = "float64"))]
+use fearless_simd::x86::Avx512;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use fearless_simd::x86::{Avx2, Avx512, Sse2, Sse4_2};
+use fearless_simd::x86::{Avx2, Sse2, Sse4_2};
 use fearless_simd::{Level, Simd, SimdBase, SimdInto, SimdSplit, f32x8, i16x16, i32x8, u32x8};
 #[cfg(feature = "float64")]
 use fearless_simd::{f64x8, u64x8};
