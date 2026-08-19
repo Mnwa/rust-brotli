@@ -1466,7 +1466,7 @@ fn ZopfliIterate<AllocF: Allocator<floatX>>(
     gap: usize,
     dist_cache: &[i32],
     model: &ZopfliCostModel<AllocF>,
-    num_matches: &[u32],
+    num_matches: &[u8],
     matches: &[u64],
     nodes: &mut [ZopfliNode],
 ) -> usize {
@@ -1503,7 +1503,7 @@ fn ZopfliIterateSimd<S: Simd, AllocF: Allocator<floatX>>(
     gap: usize,
     dist_cache: &[i32],
     model: &ZopfliCostModel<AllocF>,
-    num_matches: &[u32],
+    num_matches: &[u8],
     matches: &[u64],
     nodes: &mut [ZopfliNode],
 ) -> usize {
@@ -1575,7 +1575,7 @@ fn ZopfliIterateSimd<S: Simd, AllocF: Allocator<floatX>>(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn BrotliCreateHqZopfliBackwardReferences<
-    Alloc: Allocator<u32> + Allocator<u64> + Allocator<floatX> + Allocator<ZopfliNode>,
+    Alloc: Allocator<u8> + Allocator<u32> + Allocator<u64> + Allocator<floatX> + Allocator<ZopfliNode>,
     Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
     Params: H10Params,
 >(
@@ -1616,7 +1616,7 @@ pub fn BrotliCreateHqZopfliBackwardReferences<
 }
 
 pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
-    Alloc: Allocator<u32> + Allocator<u64> + Allocator<floatX> + Allocator<ZopfliNode>,
+    Alloc: Allocator<u8> + Allocator<u32> + Allocator<u64> + Allocator<floatX> + Allocator<ZopfliNode>,
     Buckets: Allocable<u32, Alloc> + SliceWrapperMut<u32> + SliceWrapper<u32>,
     Params: H10Params,
 >(
@@ -1639,8 +1639,8 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
     Buckets: PartialEq<Buckets>,
 {
     let max_backward_limit: usize = (1usize << params.lgwin).wrapping_sub(16);
-    let mut num_matches = alloc_or_default::<u32, _>(alloc, num_bytes);
-    let mut matches_size: usize = (4usize).wrapping_mul(num_bytes);
+    let mut num_matches = alloc_or_default::<u8, _>(alloc, num_bytes);
+    let mut matches_size: usize = (3usize).wrapping_mul(num_bytes);
     let store_end: usize = if num_bytes >= STORE_LOOKAHEAD_H_10 {
         position
             .wrapping_add(num_bytes)
@@ -1715,7 +1715,8 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
                 {}
                 j = j.wrapping_add(1);
             }
-            num_matches.slice_mut()[i] = num_found_matches as u32;
+            debug_assert!(num_found_matches <= MAX_NUM_MATCHES_H10);
+            num_matches.slice_mut()[i] = num_found_matches as u8;
             if num_found_matches > 0usize {
                 let match_len =
                     BackwardMatch(matches.slice()[cur_match_end.wrapping_sub(1)]).length();
@@ -1724,7 +1725,7 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
                     let tmp = matches.slice()[(cur_match_end.wrapping_sub(1) as usize)];
                     matches.slice_mut()[cur_match_pos] = tmp;
                     cur_match_pos = cur_match_pos.wrapping_add(1);
-                    num_matches.slice_mut()[i] = 1u32;
+                    num_matches.slice_mut()[i] = 1u8;
                     hasher.StoreRange(
                         ringbuffer,
                         ringbuffer_mask,
@@ -1816,5 +1817,5 @@ pub(crate) fn BrotliCreateHqZopfliBackwardReferencesAtLevel<
     model.cleanup(alloc);
     <Alloc as Allocator<ZopfliNode>>::free_cell(alloc, nodes);
     <Alloc as Allocator<u64>>::free_cell(alloc, matches);
-    <Alloc as Allocator<u32>>::free_cell(alloc, num_matches);
+    <Alloc as Allocator<u8>>::free_cell(alloc, num_matches);
 }
